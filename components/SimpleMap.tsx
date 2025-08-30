@@ -36,6 +36,7 @@ export default function SimpleMap({
   const districtBordersRef = useRef<L.GeoJSON | null>(null);
   const selectedColorRef = useRef<string>(selectedColor);
   const areaColorsRef = useRef<Map<string, string>>(areaColors);
+  const currentLevelRef = useRef<AdminLevel>(currentLevel);
 
   // Update refs when props change
   useEffect(() => {
@@ -45,6 +46,10 @@ export default function SimpleMap({
   useEffect(() => {
     areaColorsRef.current = areaColors;
   }, [areaColors]);
+
+  useEffect(() => {
+    currentLevelRef.current = currentLevel;
+  }, [currentLevel]);
 
   // Initialize map
   useEffect(() => {
@@ -79,10 +84,39 @@ export default function SimpleMap({
     mapRef.current = map;
     labelsLayerRef.current = L.layerGroup().addTo(map);
 
+    // Add zoom event listener to update labels when zoom changes
+    map.on('zoomend', () => {
+      if (labelsLayerRef.current) {
+        labelsLayerRef.current.eachLayer((labelLayer: any) => {
+          const marker = labelLayer as L.Marker;
+          const icon = marker.getIcon() as L.DivIcon;
+          const currentHtml = icon.options.html;
+
+          if (typeof currentHtml === 'string') {
+            const areaNameMatch = currentHtml.match(/>(.*?)<\/div>/);
+            if (areaNameMatch) {
+              const areaName = areaNameMatch[1];
+              const newLabelSize = getLabelSize(currentLevelRef.current);
+              const newHtml = `<div style="color: #000; font-size: ${newLabelSize}px; font-weight: bold; text-align: center; pointer-events: none; text-shadow: 1px 1px 2px rgba(255,255,255,0.8);">${areaName}</div>`;
+
+              const newIcon = L.divIcon({
+                className: 'area-label',
+                html: newHtml,
+                iconSize: [120, 24],
+                iconAnchor: [60, 12]
+              });
+              marker.setIcon(newIcon);
+            }
+          }
+        });
+      }
+    });
+
     return () => {
       if (mapRef.current) {
         removeProvinceBorders();
         removeDistrictBorders();
+        mapRef.current.off('zoomend');
         mapRef.current.remove();
         mapRef.current = null;
       }
@@ -302,34 +336,96 @@ export default function SimpleMap({
             // Use polygon centroid for better positioning instead of bounds center
             let labelPosition;
             try {
-              // Try to calculate centroid from the polygon
-              if ((layer as any).getLatLngs && (layer as any).getLatLngs().length > 0) {
-                // For polygon, calculate centroid
-                const latLngs = (layer as any).getLatLngs()[0]; // Get outer ring
-                if (Array.isArray(latLngs) && latLngs.length > 0) {
-                  let lat = 0, lng = 0;
-                  for (const point of latLngs) {
-                    lat += point.lat;
-                    lng += point.lng;
-                  }
-                  lat /= latLngs.length;
-                  lng /= latLngs.length;
-                  labelPosition = L.latLng(lat, lng);
-                } else {
-                  labelPosition = (layer as any).getBounds().getCenter();
+              // Calculate polygon centroid using proper geometry
+              const geoJsonLayer = layer as L.GeoJSON;
+
+              // Check if it's a Polygon or MultiPolygon
+              if (feature.geometry.type === 'Polygon') {
+                const coordinates = feature.geometry.coordinates[0]; // Get outer ring
+
+                // Calculate true polygon centroid using shoelace formula
+                let area = 0;
+                let centroidLng = 0;
+                let centroidLat = 0;
+
+                for (let i = 0; i < coordinates.length - 1; i++) {
+                  const x0 = coordinates[i][0];
+                  const y0 = coordinates[i][1];
+                  const x1 = coordinates[i + 1][0];
+                  const y1 = coordinates[i + 1][1];
+
+                  const a = x0 * y1 - x1 * y0;
+                  area += a;
+                  centroidLng += (x0 + x1) * a;
+                  centroidLat += (y0 + y1) * a;
                 }
+
+                area *= 0.5;
+                centroidLng /= (6 * area);
+                centroidLat /= (6 * area);
+
+                labelPosition = L.latLng(centroidLat, centroidLng);
+
+              } else if (feature.geometry.type === 'MultiPolygon') {
+                // For MultiPolygon, use the largest polygon's centroid
+                const polygons = feature.geometry.coordinates;
+                let largestPolygon = polygons[0];
+                let maxArea = 0;
+
+                // Find the largest polygon by approximate area
+                for (const polygon of polygons) {
+                  const coords = polygon[0];
+                  const area = Math.abs(coords.reduce((acc: number, curr: number[], i: number) => {
+                    const next = coords[(i + 1) % coords.length];
+                    return acc + (curr[0] * next[1] - next[0] * curr[1]);
+                  }, 0)) / 2;
+
+                  if (area > maxArea) {
+                    maxArea = area;
+                    largestPolygon = polygon;
+                  }
+                }
+
+                const coordinates = largestPolygon[0];
+
+                // Calculate true polygon centroid for the largest polygon
+                let area = 0;
+                let centroidLng = 0;
+                let centroidLat = 0;
+
+                for (let i = 0; i < coordinates.length - 1; i++) {
+                  const x0 = coordinates[i][0];
+                  const y0 = coordinates[i][1];
+                  const x1 = coordinates[i + 1][0];
+                  const y1 = coordinates[i + 1][1];
+
+                  const a = x0 * y1 - x1 * y0;
+                  area += a;
+                  centroidLng += (x0 + x1) * a;
+                  centroidLat += (y0 + y1) * a;
+                }
+
+                area *= 0.5;
+                centroidLng /= (6 * area);
+                centroidLat /= (6 * area);
+
+                labelPosition = L.latLng(centroidLat, centroidLng);
+
               } else {
-                labelPosition = (layer as any).getBounds().getCenter();
+                // Fallback to bounds center for other geometry types
+                labelPosition = (geoJsonLayer as any).getBounds().getCenter();
               }
             } catch (error) {
               // Fallback to bounds center if centroid calculation fails
+              console.warn('Centroid calculation failed, using bounds center:', error);
               labelPosition = (layer as any).getBounds().getCenter();
             }
 
+            const labelSize = getLabelSize(currentLevel);
             const marker = L.marker(labelPosition, {
               icon: L.divIcon({
                 className: 'area-label',
-                html: `<div style="color: #000; font-size: ${getLabelSize(currentLevel)}px; font-weight: bold; text-align: center; pointer-events: none; text-shadow: 1px 1px 2px rgba(255,255,255,0.8);">${areaName}</div>`,
+                html: `<div style="color: #000; font-size: ${labelSize}px; font-weight: bold; text-align: center; pointer-events: none; text-shadow: 1px 1px 2px rgba(255,255,255,0.8);">${areaName}</div>`,
                 iconSize: [120, 24],
                 iconAnchor: [60, 12]
               })
@@ -372,6 +468,7 @@ export default function SimpleMap({
 
     layer.addTo(mapRef.current);
     currentLayerRef.current = layer;
+
 
     // Fit to bounds
     const bounds = layer.getBounds();
@@ -471,16 +568,25 @@ export default function SimpleMap({
   };
 
   const getLabelSize = (level: AdminLevel): number => {
-    switch (level) {
-      case 'provinces':
-        return 10;
-      case 'districts':
-        return 9; // Smaller size for districts since there are more of them
-      case 'subdistricts':
-        return 7;
-      default:
-        return 10;
-    }
+    if (!mapRef.current) return 10;
+
+    const zoom = mapRef.current.getZoom();
+    const baseSize = (() => {
+      switch (level) {
+        case 'provinces':
+          return 8;
+        case 'districts':
+          return 4;
+        case 'subdistricts':
+          return 6;
+        default:
+          return 9;
+      }
+    })();
+
+    // Scale font size more aggressively with zoom level
+    const zoomFactor = Math.max(0.6, Math.min(3, zoom / 6));
+    return Math.round(baseSize * zoomFactor);
   };
 
   const getDefaultStyle = () => ({
