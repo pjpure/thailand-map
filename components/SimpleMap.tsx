@@ -578,9 +578,9 @@ export default function SimpleMap({
         case 'districts':
           return 4;
         case 'subdistricts':
-          return 6;
+          return 4;
         default:
-          return 9;
+          return 6;
       }
     })();
 
