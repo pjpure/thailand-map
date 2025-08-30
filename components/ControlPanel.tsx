@@ -127,7 +127,7 @@ export default function ControlPanel({
 
 function SelectedFeatureInfo({ feature, level }: { feature: GeoJSONFeature; level: AdminLevel }) {
   const props = feature.properties;
-  
+
   const getName = () => {
     switch (level) {
       case 'provinces':

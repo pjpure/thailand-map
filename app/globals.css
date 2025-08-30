@@ -71,3 +71,8 @@ body {
 .leaflet-control-zoom a:hover {
   background: #f0f0f0 !important;
 }
+
+.leaflet-container {
+  background-color: #ffffff !important;
+}
+  

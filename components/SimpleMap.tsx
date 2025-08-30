@@ -14,6 +14,7 @@ interface SimpleMapProps extends Readonly<{}> {
   onAreaColorsChange: (colors: Map<string, string>) => void;
   onMapReady?: () => void;
   selectedProvinces?: string[]; // Array of province codes to filter districts
+  borderColor?: string; // Custom border color
 }
 
 export default function SimpleMap({
@@ -22,7 +23,8 @@ export default function SimpleMap({
   areaColors,
   onAreaColorsChange,
   onMapReady,
-  selectedProvinces = []
+  selectedProvinces = [],
+  borderColor = '#000000'
 }: SimpleMapProps) {
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -94,6 +96,19 @@ export default function SimpleMap({
     updateLayerColors();
   }, [areaColors]);
 
+  // Update border colors when borderColor changes
+  useEffect(() => {
+    updateLayerColors();
+    // Also update province borders if they exist
+    if (currentLevel === 'districts' && provinceBordersRef.current && mapRef.current) {
+      provinceBordersRef.current.setStyle({
+        color: borderColor,
+        weight: 3,
+        opacity: 1,
+      });
+    }
+  }, [borderColor]);
+
   const loadLevelData = async () => {
     try {
       const response = await fetch(`/data/${currentLevel}.geojson`);
@@ -118,34 +133,34 @@ export default function SimpleMap({
     try {
       const response = await fetch('/data/provinces.geojson');
       const provincesData = await response.json();
-      
+
       if (mapRef.current) {
         // Remove existing province borders
         removeProvinceBorders();
-        
+
         // Filter provinces based on selection
         let filteredProvincesData = provincesData;
         if (selectedProvinces.length > 0) {
           filteredProvincesData = {
             ...provincesData,
-            features: provincesData.features.filter((feature: any) => 
+            features: provincesData.features.filter((feature: any) =>
               selectedProvinces.includes(feature.properties.pro_code)
             )
           };
         }
-        
-        // Add province borders with thick dark black lines
+
+        // Add province borders with custom color
         const provinceBordersLayer = L.geoJSON(filteredProvincesData, {
           style: () => ({
             fillColor: 'transparent',
             fillOpacity: 0,
-            color: '#000000', // Dark black color
+            color: borderColor, // Use custom border color
             weight: 3,
             opacity: 1,
           }),
           interactive: false // Make it non-interactive so clicks go through to districts
         });
-        
+
         provinceBordersLayer.addTo(mapRef.current);
         provinceBordersRef.current = provinceBordersLayer;
       }
@@ -169,7 +184,7 @@ export default function SimpleMap({
     if (currentLevel === 'districts' && selectedProvinces.length > 0) {
       filteredData = {
         ...geojsonData,
-        features: geojsonData.features.filter((feature: any) => 
+        features: geojsonData.features.filter((feature: any) =>
           selectedProvinces.includes(feature.properties.pro_code)
         )
       };
@@ -236,7 +251,7 @@ export default function SimpleMap({
               // Fallback to bounds center if centroid calculation fails
               labelPosition = (layer as any).getBounds().getCenter();
             }
-            
+
             const marker = L.marker(labelPosition, {
               icon: L.divIcon({
                 className: 'area-label',
@@ -350,16 +365,8 @@ export default function SimpleMap({
   };
 
   const getStrokeColor = (level: AdminLevel): string => {
-    switch (level) {
-      case 'provinces':
-        return '#000000'; // Dark black
-      case 'districts':
-        return '#666666'; // Light black (gray)
-      case 'subdistricts':
-        return '#888888'; // Lighter gray
-      default:
-        return '#000000';
-    }
+    // Use custom border color for all levels
+    return borderColor;
   };
 
   const getStrokeOpacity = (level: AdminLevel): number => {
