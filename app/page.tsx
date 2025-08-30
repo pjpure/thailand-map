@@ -12,6 +12,8 @@ import {
   Eye,
   EyeOff,
   Save,
+  Download,
+  Upload,
 } from "lucide-react";
 
 // Dynamically import Map component to avoid SSR issues with Leaflet
@@ -106,6 +108,131 @@ const getStoredMapConfig = (): MapConfig | null => {
   return null;
 };
 
+// CSV export/import functions
+type ExportData = {
+  areaCode: string;
+  areaName: string;
+  color: string;
+  level: AdminLevel;
+};
+
+const exportToCSV = (
+  areaColors: Map<string, string>,
+  currentLevel: AdminLevel,
+  availableProvinces: ProvinceItem[],
+  availableDistricts: DistrictItem[],
+  selectedProvinces: string[],
+  selectedDistricts: string[]
+) => {
+  const data: ExportData[] = [];
+
+  // Get all areas based on current level and filters
+  let allAreas: { code: string; name: string }[] = [];
+
+  if (currentLevel === "provinces") {
+    allAreas = availableProvinces.map(p => ({ code: p.code, name: p.name }));
+  } else if (currentLevel === "districts") {
+    // Filter districts based on selected provinces
+    if (selectedProvinces.length > 0) {
+      allAreas = availableDistricts
+        .filter(d => selectedProvinces.includes(d.provinceCode))
+        .map(d => ({ code: d.code, name: d.name }));
+    } else {
+      allAreas = availableDistricts.map(d => ({ code: d.code, name: d.name }));
+    }
+  } else {
+    // For subdistricts, filter based on selected districts if any
+    if (selectedDistricts.length > 0) {
+      // Only export colored subdistricts that belong to selected districts
+      areaColors.forEach((color, areaCode) => {
+        // For subdistricts, we need to check if they belong to selected districts
+        // Since we don't have full subdistrict data loaded, we'll export all colored ones
+        // This is a limitation of the current data structure
+        allAreas.push({ code: areaCode, name: areaCode });
+      });
+    } else {
+      // Export all colored subdistricts
+      areaColors.forEach((color, areaCode) => {
+        allAreas.push({ code: areaCode, name: areaCode });
+      });
+    }
+  }
+
+  // Create data for all areas
+  allAreas.forEach(area => {
+    const color = areaColors.get(area.code) || ""; // Empty string if not colored
+
+    data.push({
+      areaCode: area.code,
+      areaName: area.name,
+      color,
+      level: currentLevel
+    });
+  });
+
+  // Sort by area name for better organization
+  data.sort((a, b) => a.areaName.localeCompare(b.areaName));
+
+  const csvContent = [
+    ["Area Code", "Area Name", "Color", "Level"].join(","),
+    ...data.map(row => [row.areaCode, row.areaName, row.color, row.level].join(","))
+  ].join("\n");
+
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const link = document.createElement("a");
+
+  if (link.download !== undefined) {
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `thailand-map-colors-${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+};
+
+const importFromCSV = (file: File): Promise<{ colors: Map<string, string>, level: AdminLevel }> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target?.result as string;
+        const lines = text.split("\n").filter(line => line.trim());
+        const newAreaColors = new Map<string, string>();
+        let detectedLevel: AdminLevel = "provinces"; // default
+
+        // Skip header row
+        for (let i = 1; i < lines.length; i++) {
+          const [areaCode, , color, level] = lines[i].split(",");
+          if (areaCode) {
+            const trimmedAreaCode = areaCode.trim();
+            const trimmedColor = color ? color.trim() : "";
+            const trimmedLevel = level ? level.trim() as AdminLevel : "provinces";
+
+            // Set detected level from first row
+            if (i === 1 && trimmedLevel) {
+              detectedLevel = trimmedLevel;
+            }
+
+            // Only add to map if there's actually a color
+            // Empty colors mean the area should not be colored
+            if (trimmedColor) {
+              newAreaColors.set(trimmedAreaCode, trimmedColor);
+            }
+          }
+        }
+
+        resolve({ colors: newAreaColors, level: detectedLevel });
+      } catch (error) {
+        reject(error);
+      }
+    };
+    reader.onerror = () => reject(new Error("Failed to read file"));
+    reader.readAsText(file);
+  });
+};
+
 export default function Home() {
   // Initialize with default values to avoid hydration mismatch
   const defaultPalette = [
@@ -182,6 +309,53 @@ export default function Home() {
     };
     saveMapConfig(config);
     setIsSaved(true);
+  };
+
+  const handleExportCSV = () => {
+    if (currentLevel === "provinces" && availableProvinces.length === 0) {
+      alert("กำลังโหลดข้อมูลจังหวัด กรุณารอสักครู่");
+      return;
+    }
+    if (currentLevel === "districts" && availableDistricts.length === 0) {
+      alert("กำลังโหลดข้อมูลอำเภอ กรุณารอสักครู่");
+      return;
+    }
+    if (currentLevel === "subdistricts" && areaColors.size === 0) {
+      alert("ไม่มีข้อมูลตำบลที่จะส่งออก กรุณาลงสีตำบลก่อน");
+      return;
+    }
+    exportToCSV(areaColors, currentLevel, availableProvinces, availableDistricts, selectedProvinces, selectedDistricts);
+  };
+
+  const handleImportCSV = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const importResult = await importFromCSV(file);
+      const { colors: importedColors, level: importedLevel } = importResult;
+
+      // Set the imported colors and level
+      setAreaColors(importedColors);
+      setCurrentLevel(importedLevel);
+      setIsSaved(false);
+
+      // Reset file input
+      event.target.value = "";
+
+      // Show success message with more detail
+      const totalAreas = importedColors.size;
+      const levelNames = {
+        provinces: "จังหวัด",
+        districts: "อำเภอ",
+        subdistricts: "ตำบล"
+      };
+      alert(`นำเข้าข้อมูลสำเร็จ: ${totalAreas} พื้นที่มีสี\nระดับ: ${levelNames[importedLevel]}\n(พื้นที่ที่ไม่มีสีในไฟล์จะถูกล้างออก)`);
+    } catch (error) {
+      console.error("Import error:", error);
+      alert("เกิดข้อผิดพลาดในการนำเข้าไฟล์ CSV กรุณาตรวจสอบรูปแบบไฟล์");
+      event.target.value = "";
+    }
   };
 
   // Load provinces and districts list when component mounts
@@ -340,8 +514,8 @@ export default function Home() {
               onClick={handleSaveConfig}
               disabled={isSaved}
               className={`save-button flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 py-1.5 border transition-all duration-200 rounded-sm flex-shrink-0 ${isSaved
-                  ? "border-gray-300 bg-gray-100 cursor-not-allowed"
-                  : "border-green-300 bg-white hover:bg-green-50 hover:border-green-400 cursor-pointer"
+                ? "border-gray-300 bg-gray-100 cursor-not-allowed"
+                : "border-green-300 bg-white hover:bg-green-50 hover:border-green-400 cursor-pointer"
                 }`}
               title={isSaved ? "ไม่มีการเปลี่ยนแปลง" : "บันทึกการตั้งค่า"}
             >
@@ -351,34 +525,29 @@ export default function Home() {
               </span>
             </button>
 
-            {/* Toggle Area Names Button */}
+            {/* Export CSV Button */}
             <button
-              onClick={() => {
-                setShowAreaNames(!showAreaNames);
-                setIsSaved(false);
-              }}
-              className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 py-1.5 border border-gray-300 bg-white hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 rounded-sm flex-shrink-0"
-              title={showAreaNames ? "ซ่อนชื่อพื้นที่" : "แสดงชื่อพื้นที่"}
+              onClick={handleExportCSV}
+              className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 py-1.5 border border-gray-300 bg-white hover:bg-blue-50 hover:border-blue-300 transition-all duration-200 rounded-sm flex-shrink-0"
+              title="ส่งออกข้อมูลเป็น CSV"
             >
-              {showAreaNames ? (
-                <Eye className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-gray-600" />
-              ) : (
-                <EyeOff className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-gray-600" />
-              )}
-              <span className="text-xs font-medium text-gray-600 hidden sm:inline">
-                {showAreaNames ? "ซ่อนชื่อ" : "แสดงชื่อ"}
-              </span>
+              <Download className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-blue-600" />
+              <span className="text-xs font-medium text-blue-600 hidden sm:inline">ส่งออก</span>
             </button>
 
-            {/* Clear Colors Button */}
-            <button
-              onClick={handleClearColors}
-              className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 py-1.5 border border-gray-300 bg-white hover:bg-red-50 hover:border-red-300 transition-all duration-200 rounded-sm flex-shrink-0"
-              title="ล้างสีทั้งหมด"
-            >
-              <RotateCcw className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-red-600" />
-              <span className="text-xs font-medium text-red-600 hidden sm:inline">ล้างสี</span>
-            </button>
+            {/* Import CSV Button */}
+            <label className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 py-1.5 border border-gray-300 bg-white hover:bg-orange-50 hover:border-orange-300 transition-all duration-200 rounded-sm flex-shrink-0 cursor-pointer"
+              title="นำเข้าข้อมูลจาก CSV">
+              <Upload className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-orange-600" />
+              <span className="text-xs font-medium text-orange-600 hidden sm:inline">นำเข้า</span>
+              <input
+                type="file"
+                accept=".csv"
+                onChange={handleImportCSV}
+                className="hidden"
+              />
+            </label>
+
           </div>
         </div>
 
@@ -611,7 +780,7 @@ export default function Home() {
             )}
           </div>
 
-          {/* Color Pickers - Stack on mobile */}
+          {/* Color Pickers and Action Buttons - Stack on mobile */}
           <div className="flex flex-col sm:flex-row sm:items-center space-y-3 sm:space-y-0 sm:space-x-6">
             {/* Area Color Picker */}
             <div className="flex flex-col sm:flex-row sm:items-center space-y-2 sm:space-y-0 sm:space-x-3">
@@ -701,6 +870,38 @@ export default function Home() {
                   </label>
                 );
               })()}
+            </div>
+
+            {/* Action Buttons Group - Stay together on small screens */}
+            <div className="flex items-center space-x-2">
+              {/* Toggle Area Names Button */}
+              <button
+                onClick={() => {
+                  setShowAreaNames(!showAreaNames);
+                  setIsSaved(false);
+                }}
+                className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 py-1.5 border border-gray-300 bg-white hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 rounded-sm flex-shrink-0"
+                title={showAreaNames ? "ซ่อนชื่อพื้นที่" : "แสดงชื่อพื้นที่"}
+              >
+                {showAreaNames ? (
+                  <Eye className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-gray-600" />
+                ) : (
+                  <EyeOff className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-gray-600" />
+                )}
+                <span className="text-xs font-medium text-gray-600 sm:inline w-12">
+                  {showAreaNames ? "ซ่อนชื่อ" : "แสดงชื่อ"}
+                </span>
+              </button>
+
+              {/* Clear Colors Button */}
+              <button
+                onClick={handleClearColors}
+                className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 py-1.5 border border-gray-300 bg-white hover:bg-red-50 hover:border-red-300 transition-all duration-200 rounded-sm flex-shrink-0"
+                title="ล้างสีทั้งหมด"
+              >
+                <RotateCcw className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-red-600" />
+                <span className="text-xs font-medium text-red-600 sm:inline w-12">ล้างสี</span>
+              </button>
             </div>
           </div>
         </div>
