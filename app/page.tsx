@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { Palette, Layers, RotateCcw, Search, X, ChevronDown } from 'lucide-react';
 
@@ -28,16 +28,60 @@ const ADMIN_LEVELS: { value: AdminLevel; label: string }[] = [
 type ProvinceItem = { code: string; name: string };
 type DistrictItem = { code: string; name: string; provinceCode: string };
 
+// localStorage functions
+const PALETTE_STORAGE_KEY = 'thailand-map-palette';
+const SELECTED_COLOR_STORAGE_KEY = 'thailand-map-selected-color';
+
+const getStoredPalette = (): string[] => {
+  if (typeof window === 'undefined') return ['#ff3b30', '#34c759', '#007aff', '#ffcc00', '#8e8e93'];
+  const stored = localStorage.getItem(PALETTE_STORAGE_KEY);
+  if (stored) {
+    try {
+      return JSON.parse(stored);
+    } catch (e) {
+      console.warn('Error parsing stored palette:', e);
+    }
+  }
+  return ['#ff3b30', '#34c759', '#007aff', '#ffcc00', '#8e8e93']; // Default palette
+};
+
+const getStoredSelectedColor = (defaultPalette: string[]): string => {
+  if (typeof window === 'undefined') return defaultPalette[0];
+  const stored = localStorage.getItem(SELECTED_COLOR_STORAGE_KEY);
+  if (stored && defaultPalette.includes(stored)) {
+    return stored;
+  }
+  return defaultPalette[0];
+};
+
+const savePalette = (palette: string[]) => {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(PALETTE_STORAGE_KEY, JSON.stringify(palette));
+  }
+};
+
+const saveSelectedColor = (color: string) => {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(SELECTED_COLOR_STORAGE_KEY, color);
+  }
+};
+
 export default function Home() {
-  // พาเล็ต 5 สีเริ่มต้น (แก้ไขได้)
-  const [palette, setPalette] = useState<string[]>([
-    '#ff3b30', // แดง
-    '#34c759', // เขียว
-    '#007aff', // น้ำเงิน
-    '#ffcc00', // เหลือง
-    '#8e8e93', // เทาเข้ม
-  ]);
-  const [selectedColor, setSelectedColor] = useState(palette[0]);
+  // Initialize with default values to avoid hydration mismatch
+  const defaultPalette = ['#ff3b30', '#34c759', '#007aff', '#ffcc00', '#8e8e93'];
+  const [palette, setPalette] = useState<string[]>(defaultPalette);
+  const [selectedColor, setSelectedColor] = useState(defaultPalette[0]);
+  const [isHydrated, setIsHydrated] = useState(false);
+
+  // Load from localStorage after hydration to avoid SSR mismatch
+  useEffect(() => {
+    const storedPalette = getStoredPalette();
+    const storedSelectedColor = getStoredSelectedColor(storedPalette);
+
+    setPalette(storedPalette);
+    setSelectedColor(storedSelectedColor);
+    setIsHydrated(true);
+  }, []);
 
   const [currentLevel, setCurrentLevel] = useState<AdminLevel>('provinces');
   const [isLoading, setIsLoading] = useState(true);
@@ -64,7 +108,7 @@ export default function Home() {
   };
 
   // Load provinces and districts list when component mounts
-  React.useEffect(() => {
+  useEffect(() => {
     const loadProvinces = async () => {
       try {
         const response = await fetch('/data/provinces.geojson');
@@ -107,7 +151,7 @@ export default function Home() {
   }, []);
 
   // Close dropdown when clicking outside
-  React.useEffect(() => {
+  useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Element;
       if (!target.closest('.province-dropdown')) {
@@ -168,9 +212,13 @@ export default function Home() {
       const old = next[index];
       next[index] = newColor;
 
+      // Save updated palette to localStorage
+      savePalette(next);
+
       // ถ้ากำลังเลือกสีเดิมอยู่ ให้ตามไปเป็นสีใหม่ด้วย
       if (selectedColor === old) {
         setSelectedColor(newColor);
+        saveSelectedColor(newColor);
       }
       return next;
     });
@@ -416,7 +464,10 @@ export default function Home() {
                 {palette.map((color, idx) => (
                   <div key={idx} className="flex flex-col items-center">
                     <button
-                      onClick={() => setSelectedColor(color)}
+                      onClick={() => {
+                        setSelectedColor(color);
+                        saveSelectedColor(color);
+                      }}
                       className={`w-7 h-7 border transition-all rounded-sm ${selectedColor === color
                         ? 'border-gray-700 ring-2 ring-blue-400 ring-offset-1 scale-105'
                         : 'border-gray-300 hover:border-gray-500 hover:scale-105'
