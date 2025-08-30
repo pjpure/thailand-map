@@ -58,7 +58,7 @@ export default function SimpleMap({
       maxZoom: THAILAND_CONFIG.maxZoom,
       zoomControl: true,
       scrollWheelZoom: true,
-      doubleClickZoom: true,
+      doubleClickZoom: false,
       dragging: true,
       attributionControl: false,
     });
@@ -107,7 +107,7 @@ export default function SimpleMap({
     if (currentLevel === 'districts' && provinceBordersRef.current && mapRef.current) {
       provinceBordersRef.current.setStyle({
         color: borderColor,
-        weight: 3,
+        weight: 2,
         opacity: 1,
       });
     }
@@ -172,7 +172,7 @@ export default function SimpleMap({
             fillColor: 'transparent',
             fillOpacity: 0,
             color: borderColor, // Use custom border color
-            weight: 3,
+            weight: 2,
             opacity: 1,
           }),
           interactive: false // Make it non-interactive so clicks go through to districts
@@ -253,7 +253,7 @@ export default function SimpleMap({
         )
       };
     }
-    
+
     // Filter data based on selected districts for subdistricts level
     if (currentLevel === 'subdistricts' && selectedDistricts.length > 0) {
       filteredData = {
@@ -428,13 +428,13 @@ export default function SimpleMap({
   const getStrokeWeight = (level: AdminLevel): number => {
     switch (level) {
       case 'provinces':
-        return 2;
+        return 1;
       case 'districts':
-        return 1.5;
+        return 1;
       case 'subdistricts':
         return 1;
       default:
-        return 2;
+        return 1;
     }
   };
 
@@ -473,13 +473,13 @@ export default function SimpleMap({
   const getLabelSize = (level: AdminLevel): number => {
     switch (level) {
       case 'provinces':
-        return 12;
+        return 10;
       case 'districts':
         return 9; // Smaller size for districts since there are more of them
       case 'subdistricts':
         return 7;
       default:
-        return 12;
+        return 10;
     }
   };
 
