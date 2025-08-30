@@ -11,6 +11,7 @@ import {
   ChevronDown,
   Eye,
   EyeOff,
+  Save,
 } from "lucide-react";
 
 // Dynamically import Map component to avoid SSR issues with Leaflet
@@ -40,6 +41,7 @@ type DistrictItem = { code: string; name: string; provinceCode: string };
 // localStorage functions
 const PALETTE_STORAGE_KEY = "thailand-map-palette";
 const SELECTED_COLOR_STORAGE_KEY = "thailand-map-selected-color";
+const CONFIG_STORAGE_KEY = "thailand-map-config";
 
 const getStoredPalette = (): string[] => {
   if (typeof window === "undefined")
@@ -76,6 +78,34 @@ const saveSelectedColor = (color: string) => {
   }
 };
 
+type MapConfig = {
+  currentLevel: AdminLevel;
+  areaColors: [string, string][];
+  selectedProvinces: string[];
+  selectedDistricts: string[];
+  borderColor: string;
+  showAreaNames: boolean;
+};
+
+const saveMapConfig = (config: MapConfig) => {
+  if (typeof window !== "undefined") {
+    localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
+  }
+};
+
+const getStoredMapConfig = (): MapConfig | null => {
+  if (typeof window === "undefined") return null;
+  const stored = localStorage.getItem(CONFIG_STORAGE_KEY);
+  if (stored) {
+    try {
+      return JSON.parse(stored);
+    } catch (e) {
+      console.warn("Error parsing stored config:", e);
+    }
+  }
+  return null;
+};
+
 export default function Home() {
   // Initialize with default values to avoid hydration mismatch
   const defaultPalette = [
@@ -87,16 +117,25 @@ export default function Home() {
   ];
   const [palette, setPalette] = useState<string[]>(defaultPalette);
   const [selectedColor, setSelectedColor] = useState(defaultPalette[0]);
-  const [isHydrated, setIsHydrated] = useState(false);
 
   // Load from localStorage after hydration to avoid SSR mismatch
   useEffect(() => {
     const storedPalette = getStoredPalette();
     const storedSelectedColor = getStoredSelectedColor(storedPalette);
+    const storedConfig = getStoredMapConfig();
 
     setPalette(storedPalette);
     setSelectedColor(storedSelectedColor);
-    setIsHydrated(true);
+
+    // Load saved configuration if available
+    if (storedConfig) {
+      setCurrentLevel(storedConfig.currentLevel);
+      setAreaColors(new Map(storedConfig.areaColors));
+      setSelectedProvinces(storedConfig.selectedProvinces);
+      setSelectedDistricts(storedConfig.selectedDistricts);
+      setBorderColor(storedConfig.borderColor);
+      setShowAreaNames(storedConfig.showAreaNames);
+    }
   }, []);
 
   const [currentLevel, setCurrentLevel] = useState<AdminLevel>("provinces");
@@ -125,9 +164,24 @@ export default function Home() {
 
   // สถานะแสดง/ซ่อนชื่อพื้นที่
   const [showAreaNames, setShowAreaNames] = useState(true);
+  const [isSaved, setIsSaved] = useState(true);
 
   const handleClearColors = () => {
     setAreaColors(new Map());
+    setIsSaved(false);
+  };
+
+  const handleSaveConfig = () => {
+    const config: MapConfig = {
+      currentLevel,
+      areaColors: Array.from(areaColors.entries()),
+      selectedProvinces,
+      selectedDistricts,
+      borderColor,
+      showAreaNames,
+    };
+    saveMapConfig(config);
+    setIsSaved(true);
   };
 
   // Load provinces and districts list when component mounts
@@ -207,14 +261,17 @@ export default function Home() {
         ? prev.filter((code) => code !== provinceCode)
         : [...prev, provinceCode]
     );
+    setIsSaved(false);
   };
 
   const handleSelectAll = () => {
     setSelectedProvinces(filteredProvinces.map((p) => p.code));
+    setIsSaved(false);
   };
 
   const handleClearSelection = () => {
     setSelectedProvinces([]);
+    setIsSaved(false);
   };
 
   // District selection handlers
@@ -224,14 +281,17 @@ export default function Home() {
         ? prev.filter((code) => code !== districtCode)
         : [...prev, districtCode]
     );
+    setIsSaved(false);
   };
 
   const handleSelectAllDistricts = () => {
     setSelectedDistricts(filteredDistricts.map((d) => d.code));
+    setIsSaved(false);
   };
 
   const handleClearDistrictSelection = () => {
     setSelectedDistricts([]);
+    setIsSaved(false);
   };
 
   // อัพเดตสีในพาเล็ตทีละตำแหน่ง
@@ -249,6 +309,7 @@ export default function Home() {
         setSelectedColor(newColor);
         saveSelectedColor(newColor);
       }
+      setIsSaved(false);
       return next;
     });
   };
@@ -274,9 +335,28 @@ export default function Home() {
 
           {/* Action Buttons */}
           <div className="flex items-center space-x-2">
+            {/* Save Configuration Button */}
+            <button
+              onClick={handleSaveConfig}
+              disabled={isSaved}
+              className={`save-button flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 py-1.5 border transition-all duration-200 rounded-sm flex-shrink-0 ${isSaved
+                  ? "border-gray-300 bg-gray-100 cursor-not-allowed"
+                  : "border-green-300 bg-white hover:bg-green-50 hover:border-green-400 cursor-pointer"
+                }`}
+              title={isSaved ? "ไม่มีการเปลี่ยนแปลง" : "บันทึกการตั้งค่า"}
+            >
+              <Save className={`h-3 w-3 sm:h-3.5 sm:w-3.5 ${isSaved ? "text-gray-400" : "text-green-600"}`} />
+              <span className={`text-xs font-medium hidden sm:inline ${isSaved ? "text-gray-400" : "text-green-600"}`}>
+                {isSaved ? "บันทึกแล้ว" : "บันทึก"}
+              </span>
+            </button>
+
             {/* Toggle Area Names Button */}
             <button
-              onClick={() => setShowAreaNames(!showAreaNames)}
+              onClick={() => {
+                setShowAreaNames(!showAreaNames);
+                setIsSaved(false);
+              }}
               className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 py-1.5 border border-gray-300 bg-white hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 rounded-sm flex-shrink-0"
               title={showAreaNames ? "ซ่อนชื่อพื้นที่" : "แสดงชื่อพื้นที่"}
             >
@@ -312,7 +392,10 @@ export default function Home() {
               <span className="text-sm font-medium text-gray-700">ระดับ:</span>
               <select
                 value={currentLevel}
-                onChange={(e) => setCurrentLevel(e.target.value as AdminLevel)}
+                onChange={(e) => {
+                  setCurrentLevel(e.target.value as AdminLevel);
+                  setIsSaved(false);
+                }}
                 className="px-2.5 py-1.5 border border-gray-300 bg-white text-sm font-medium focus:outline-none focus:border-blue-400 rounded-sm hover:border-gray-400 transition-colors min-w-0 flex-1 sm:flex-initial"
               >
                 {ADMIN_LEVELS.map((level) => (
@@ -559,6 +642,7 @@ export default function Home() {
                       onClick={() => {
                         setSelectedColor(color);
                         saveSelectedColor(color);
+                        setIsSaved(false);
                       }}
                       className={`w-6 h-6 sm:w-7 sm:h-7 border transition-all rounded-sm ${selectedColor === color
                         ? "border-gray-700 ring-2 ring-blue-400 ring-offset-1 scale-105"
@@ -602,7 +686,10 @@ export default function Home() {
                     <input
                       type="color"
                       value={borderColor}
-                      onChange={(e) => setBorderColor(e.target.value)}
+                      onChange={(e) => {
+                        setBorderColor(e.target.value);
+                        setIsSaved(false);
+                      }}
                       className={`appearance-none w-6 h-6 sm:w-7 sm:h-7 p-0 border-2 rounded-sm cursor-pointer 
                         ${isCustomBorder
                           ? "border-gray-700 ring-2 ring-green-400 ring-offset-1 scale-105"
@@ -625,7 +712,10 @@ export default function Home() {
           selectedColor={selectedColor}
           currentLevel={currentLevel}
           areaColors={areaColors}
-          onAreaColorsChange={setAreaColors}
+          onAreaColorsChange={(colors) => {
+            setAreaColors(colors);
+            setIsSaved(false);
+          }}
           onMapReady={() => setIsLoading(false)}
           selectedProvinces={selectedProvinces}
           selectedDistricts={selectedDistricts}
