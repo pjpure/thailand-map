@@ -39,6 +39,7 @@ const ADMIN_LEVELS: { value: AdminLevel; label: string }[] = [
 
 type ProvinceItem = { code: string; name: string };
 type DistrictItem = { code: string; name: string; provinceCode: string };
+type SubdistrictItem = { code: string; name: string; districtCode: string; provinceCode: string };
 
 // localStorage functions
 const PALETTE_STORAGE_KEY = "thailand-map-palette";
@@ -108,83 +109,34 @@ const getStoredMapConfig = (): MapConfig | null => {
   return null;
 };
 
-// CSV export/import functions
-type ExportData = {
-  areaCode: string;
-  areaName: string;
-  color: string;
-  level: AdminLevel;
-};
+// Export/import functions
 
-const exportToCSV = (
-  areaColors: Map<string, string>,
+const exportConfig = (
   currentLevel: AdminLevel,
-  availableProvinces: ProvinceItem[],
-  availableDistricts: DistrictItem[],
+  areaColors: Map<string, string>,
   selectedProvinces: string[],
-  selectedDistricts: string[]
+  selectedDistricts: string[],
+  borderColor: string,
+  showAreaNames: boolean
 ) => {
-  const data: ExportData[] = [];
+  // Create config object exactly like localStorage save
+  const config: MapConfig = {
+    currentLevel,
+    areaColors: Array.from(areaColors.entries()),
+    selectedProvinces,
+    selectedDistricts,
+    borderColor,
+    showAreaNames,
+  };
 
-  // Get all areas based on current level and filters
-  let allAreas: { code: string; name: string }[] = [];
-
-  if (currentLevel === "provinces") {
-    allAreas = availableProvinces.map(p => ({ code: p.code, name: p.name }));
-  } else if (currentLevel === "districts") {
-    // Filter districts based on selected provinces
-    if (selectedProvinces.length > 0) {
-      allAreas = availableDistricts
-        .filter(d => selectedProvinces.includes(d.provinceCode))
-        .map(d => ({ code: d.code, name: d.name }));
-    } else {
-      allAreas = availableDistricts.map(d => ({ code: d.code, name: d.name }));
-    }
-  } else {
-    // For subdistricts, filter based on selected districts if any
-    if (selectedDistricts.length > 0) {
-      // Only export colored subdistricts that belong to selected districts
-      areaColors.forEach((color, areaCode) => {
-        // For subdistricts, we need to check if they belong to selected districts
-        // Since we don't have full subdistrict data loaded, we'll export all colored ones
-        // This is a limitation of the current data structure
-        allAreas.push({ code: areaCode, name: areaCode });
-      });
-    } else {
-      // Export all colored subdistricts
-      areaColors.forEach((color, areaCode) => {
-        allAreas.push({ code: areaCode, name: areaCode });
-      });
-    }
-  }
-
-  // Create data for all areas
-  allAreas.forEach(area => {
-    const color = areaColors.get(area.code) || ""; // Empty string if not colored
-
-    data.push({
-      areaCode: area.code,
-      areaName: area.name,
-      color,
-      level: currentLevel
-    });
-  });
-
-  // Sort by area name for better organization
-  data.sort((a, b) => a.areaName.localeCompare(b.areaName));
-
-  const csvContent = [
-    ["Area Code", "Area Name", "Color", "Level"].join(","),
-    ...data.map(row => [row.areaCode, row.areaName, row.color, row.level].join(","))
-  ].join("\n");
-
-  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const jsonContent = JSON.stringify(config);
+  const blob = new Blob([jsonContent], { type: "application/json;charset=utf-8;" });
   const link = document.createElement("a");
 
   if (link.download !== undefined) {
     const url = URL.createObjectURL(blob);
     link.setAttribute("href", url);
-    link.setAttribute("download", `thailand-map-colors-${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute("download", `thailand-map-config-${new Date().toISOString().split('T')[0]}.json`);
     link.style.visibility = "hidden";
     document.body.appendChild(link);
     link.click();
@@ -192,38 +144,14 @@ const exportToCSV = (
   }
 };
 
-const importFromCSV = (file: File): Promise<{ colors: Map<string, string>, level: AdminLevel }> => {
+const importFromJSON = (file: File): Promise<MapConfig> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
         const text = e.target?.result as string;
-        const lines = text.split("\n").filter(line => line.trim());
-        const newAreaColors = new Map<string, string>();
-        let detectedLevel: AdminLevel = "provinces"; // default
-
-        // Skip header row
-        for (let i = 1; i < lines.length; i++) {
-          const [areaCode, , color, level] = lines[i].split(",");
-          if (areaCode) {
-            const trimmedAreaCode = areaCode.trim();
-            const trimmedColor = color ? color.trim() : "";
-            const trimmedLevel = level ? level.trim() as AdminLevel : "provinces";
-
-            // Set detected level from first row
-            if (i === 1 && trimmedLevel) {
-              detectedLevel = trimmedLevel;
-            }
-
-            // Only add to map if there's actually a color
-            // Empty colors mean the area should not be colored
-            if (trimmedColor) {
-              newAreaColors.set(trimmedAreaCode, trimmedColor);
-            }
-          }
-        }
-
-        resolve({ colors: newAreaColors, level: detectedLevel });
+        const config = JSON.parse(text) as MapConfig;
+        resolve(config);
       } catch (error) {
         reject(error);
       }
@@ -283,6 +211,11 @@ export default function Home() {
   const [districtSearchTerm, setDistrictSearchTerm] = useState("");
   const [isDistrictDropdownOpen, setIsDistrictDropdownOpen] = useState(false);
 
+  // Subdistrict data for comprehensive export
+  const [availableSubdistricts, setAvailableSubdistricts] = useState<SubdistrictItem[]>(
+    []
+  );
+
   // === เปลี่ยน 1 ปุ่มเป็น Color Picker ===
   const [borderColor, setBorderColor] = useState("#000000");
 
@@ -311,49 +244,33 @@ export default function Home() {
     setIsSaved(true);
   };
 
-  const handleExportCSV = () => {
-    if (currentLevel === "provinces" && availableProvinces.length === 0) {
-      alert("กำลังโหลดข้อมูลจังหวัด กรุณารอสักครู่");
-      return;
-    }
-    if (currentLevel === "districts" && availableDistricts.length === 0) {
-      alert("กำลังโหลดข้อมูลอำเภอ กรุณารอสักครู่");
-      return;
-    }
-    if (currentLevel === "subdistricts" && areaColors.size === 0) {
-      alert("ไม่มีข้อมูลตำบลที่จะส่งออก กรุณาลงสีตำบลก่อน");
-      return;
-    }
-    exportToCSV(areaColors, currentLevel, availableProvinces, availableDistricts, selectedProvinces, selectedDistricts);
+  const handleExport = () => {
+    exportConfig(currentLevel, areaColors, selectedProvinces, selectedDistricts, borderColor, showAreaNames);
   };
 
-  const handleImportCSV = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
     try {
-      const importResult = await importFromCSV(file);
-      const { colors: importedColors, level: importedLevel } = importResult;
+      const config = await importFromJSON(file);
 
-      // Set the imported colors and level
-      setAreaColors(importedColors);
-      setCurrentLevel(importedLevel);
+      // Restore everything exactly like localStorage (same as save logic)
+      setCurrentLevel(config.currentLevel);
+      setAreaColors(new Map(config.areaColors));
+      setSelectedProvinces(config.selectedProvinces);
+      setSelectedDistricts(config.selectedDistricts);
+      setBorderColor(config.borderColor);
+      setShowAreaNames(config.showAreaNames);
       setIsSaved(false);
 
       // Reset file input
       event.target.value = "";
 
-      // Show success message with more detail
-      const totalAreas = importedColors.size;
-      const levelNames = {
-        provinces: "จังหวัด",
-        districts: "อำเภอ",
-        subdistricts: "ตำบล"
-      };
-      alert(`นำเข้าข้อมูลสำเร็จ: ${totalAreas} พื้นที่มีสี\nระดับ: ${levelNames[importedLevel]}\n(พื้นที่ที่ไม่มีสีในไฟล์จะถูกล้างออก)`);
+      alert(`นำเข้าการตั้งค่าสำเร็จ: ${config.areaColors.length} พื้นที่มีสี\nระดับ: ${config.currentLevel}`);
     } catch (error) {
       console.error("Import error:", error);
-      alert("เกิดข้อผิดพลาดในการนำเข้าไฟล์ CSV กรุณาตรวจสอบรูปแบบไฟล์");
+      alert("เกิดข้อผิดพลาดในการนำเข้าไฟล์ JSON กรุณาตรวจสอบรูปแบบไฟล์");
       event.target.value = "";
     }
   };
@@ -399,8 +316,31 @@ export default function Home() {
       }
     };
 
+    const loadSubdistricts = async () => {
+      try {
+        const response = await fetch("/data/subdistricts.geojson");
+        const data = (await response.json()) as {
+          features: Array<{
+            properties: { tam_code: string; tam_th: string; amp_code: string; pro_code: string };
+          }>;
+        };
+        const subdistricts: SubdistrictItem[] = data.features
+          .map((feature) => ({
+            code: feature.properties.tam_code,
+            name: feature.properties.tam_th,
+            districtCode: feature.properties.amp_code,
+            provinceCode: feature.properties.pro_code,
+          }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        setAvailableSubdistricts(subdistricts);
+      } catch (error) {
+        console.error("Error loading subdistricts:", error);
+      }
+    };
+
     loadProvinces();
     loadDistricts();
+    loadSubdistricts();
   }, []);
 
   // Close dropdown when clicking outside
@@ -503,7 +443,7 @@ export default function Home() {
             </div>
 
             <p className="text-xs text-gray-500 leading-none mt-1 sm:mt-2 hidden sm:block">
-              คลิก 1 ครั้ง = ลงสี | ดับเบิลคลิก = ลบสี | ลงสีได้หลายพื้นที่
+              คลิก 1 ครั้ง = ลงสี | ดับเบิลคลิก = ลบสี
             </p>
           </div>
 
@@ -525,25 +465,25 @@ export default function Home() {
               </span>
             </button>
 
-            {/* Export CSV Button */}
+            {/* Export Button */}
             <button
-              onClick={handleExportCSV}
+              onClick={handleExport}
               className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 py-1.5 border border-gray-300 bg-white hover:bg-blue-50 hover:border-blue-300 transition-all duration-200 rounded-sm flex-shrink-0"
-              title="ส่งออกข้อมูลเป็น CSV"
+              title="ส่งออกการตั้งค่าเป็น JSON"
             >
               <Download className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-blue-600" />
               <span className="text-xs font-medium text-blue-600 hidden sm:inline">ส่งออก</span>
             </button>
 
-            {/* Import CSV Button */}
+            {/* Import Button */}
             <label className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 py-1.5 border border-gray-300 bg-white hover:bg-orange-50 hover:border-orange-300 transition-all duration-200 rounded-sm flex-shrink-0 cursor-pointer"
-              title="นำเข้าข้อมูลจาก CSV">
+              title="นำเข้าการตั้งค่าจาก JSON">
               <Upload className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-orange-600" />
               <span className="text-xs font-medium text-orange-600 hidden sm:inline">นำเข้า</span>
               <input
                 type="file"
-                accept=".csv"
-                onChange={handleImportCSV}
+                accept=".json"
+                onChange={handleImport}
                 className="hidden"
               />
             </label>
