@@ -26,6 +26,7 @@ const ADMIN_LEVELS: { value: AdminLevel; label: string }[] = [
 ];
 
 type ProvinceItem = { code: string; name: string };
+type DistrictItem = { code: string; name: string; provinceCode: string };
 
 export default function Home() {
   // พาเล็ต 5 สีเริ่มต้น (แก้ไขได้)
@@ -46,6 +47,12 @@ export default function Home() {
   const [searchTerm, setSearchTerm] = useState('');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
+  // District selection for subdistricts level
+  const [selectedDistricts, setSelectedDistricts] = useState<string[]>([]);
+  const [availableDistricts, setAvailableDistricts] = useState<DistrictItem[]>([]);
+  const [districtSearchTerm, setDistrictSearchTerm] = useState('');
+  const [isDistrictDropdownOpen, setIsDistrictDropdownOpen] = useState(false);
+
   // === เปลี่ยน 1 ปุ่มเป็น Color Picker ===
   const [borderColor, setBorderColor] = useState('#000000');
 
@@ -56,7 +63,7 @@ export default function Home() {
     setAreaColors(new Map());
   };
 
-  // Load provinces list when component mounts
+  // Load provinces and districts list when component mounts
   React.useEffect(() => {
     const loadProvinces = async () => {
       try {
@@ -75,7 +82,28 @@ export default function Home() {
         console.error('Error loading provinces:', error);
       }
     };
+
+    const loadDistricts = async () => {
+      try {
+        const response = await fetch('/data/districts.geojson');
+        const data = await response.json() as {
+          features: Array<{ properties: { amp_code: string; amp_th: string; pro_code: string } }>
+        };
+        const districts: DistrictItem[] = data.features
+          .map((feature) => ({
+            code: feature.properties.amp_code,
+            name: feature.properties.amp_th,
+            provinceCode: feature.properties.pro_code,
+          }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        setAvailableDistricts(districts);
+      } catch (error) {
+        console.error('Error loading districts:', error);
+      }
+    };
+
     loadProvinces();
+    loadDistricts();
   }, []);
 
   // Close dropdown when clicking outside
@@ -84,6 +112,9 @@ export default function Home() {
       const target = event.target as Element;
       if (!target.closest('.province-dropdown')) {
         setIsDropdownOpen(false);
+      }
+      if (!target.closest('.district-dropdown')) {
+        setIsDistrictDropdownOpen(false);
       }
     };
 
@@ -94,6 +125,11 @@ export default function Home() {
   // Filter provinces based on search term
   const filteredProvinces = availableProvinces.filter((province) =>
     province.name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  // Filter districts based on search term
+  const filteredDistricts = availableDistricts.filter((district) =>
+    district.name.toLowerCase().includes(districtSearchTerm.toLowerCase())
   );
 
   const handleProvinceToggle = (provinceCode: string) => {
@@ -108,6 +144,21 @@ export default function Home() {
 
   const handleClearSelection = () => {
     setSelectedProvinces([]);
+  };
+
+  // District selection handlers
+  const handleDistrictToggle = (districtCode: string) => {
+    setSelectedDistricts((prev) =>
+      prev.includes(districtCode) ? prev.filter((code) => code !== districtCode) : [...prev, districtCode]
+    );
+  };
+
+  const handleSelectAllDistricts = () => {
+    setSelectedDistricts(filteredDistricts.map((d) => d.code));
+  };
+
+  const handleClearDistrictSelection = () => {
+    setSelectedDistricts([]);
   };
 
   // อัพเดตสีในพาเล็ตทีละตำแหน่ง
@@ -250,6 +301,92 @@ export default function Home() {
                 </div>
               </>
             )}
+
+            {/* District Filter - only show for subdistricts level */}
+            {currentLevel === 'subdistricts' && (
+              <>
+                <div className="flex items-center space-x-1.5">
+                  <span className="text-sm font-medium text-gray-700">อำเภอ:</span>
+                </div>
+                <div className="relative district-dropdown">
+                  {/* Selected districts display and toggle button */}
+                  <button
+                    onClick={() => setIsDistrictDropdownOpen(!isDistrictDropdownOpen)}
+                    className="px-2.5 py-1.5 border border-gray-300 bg-white text-sm font-medium focus:outline-none focus:border-blue-400 rounded-sm hover:border-gray-400 transition-colors min-w-[180px] flex items-center justify-between"
+                  >
+                    <span className="truncate">
+                      {selectedDistricts.length === 0
+                        ? 'เลือกอำเภอ'
+                        : selectedDistricts.length === 1
+                          ? availableDistricts.find((d) => d.code === selectedDistricts[0])?.name
+                          : `${selectedDistricts.length} อำเภอ`}
+                    </span>
+                    <ChevronDown className={`h-4 w-4 transition-transform ${isDistrictDropdownOpen ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {/* Dropdown */}
+                  {isDistrictDropdownOpen && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-300 rounded-sm shadow-lg max-h-64 overflow-hidden z-500">
+                      {/* Search input */}
+                      <div className="p-2 border-b border-gray-200">
+                        <div className="relative">
+                          <Search className="absolute left-2 top-2 h-4 w-4 text-gray-400" />
+                          <input
+                            type="text"
+                            placeholder="ค้นหาอำเภอ..."
+                            value={districtSearchTerm}
+                            onChange={(e) => setDistrictSearchTerm(e.target.value)}
+                            className="w-full pl-8 pr-2 py-1 border border-gray-300 text-sm focus:outline-none focus:border-gray-500"
+                          />
+                          {districtSearchTerm && (
+                            <X
+                              className="absolute right-2 top-2 h-4 w-4 text-gray-400 cursor-pointer hover:text-gray-600"
+                              onClick={() => setDistrictSearchTerm('')}
+                            />
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Action buttons */}
+                      <div className="p-2 border-b border-gray-200 flex space-x-2">
+                        <button
+                          onClick={handleSelectAllDistricts}
+                          className="px-2 py-1 text-xs border border-gray-300 bg-white hover:bg-gray-100"
+                          disabled={filteredDistricts.length === 0}
+                        >
+                          เลือกทั้งหมด
+                        </button>
+                        <button
+                          onClick={handleClearDistrictSelection}
+                          className="px-2 py-1 text-xs border border-gray-300 bg-white hover:bg-gray-100"
+                        >
+                          ล้าง
+                        </button>
+                      </div>
+
+                      {/* District list */}
+                      <div className="max-h-40 overflow-y-auto">
+                        {filteredDistricts.length > 0 ? (
+                          filteredDistricts.map((district) => (
+                            <label key={district.code} className="flex items-center px-3 py-2 hover:bg-gray-100 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={selectedDistricts.includes(district.code)}
+                                onChange={() => handleDistrictToggle(district.code)}
+                                className="mr-2"
+                              />
+                              <span className="text-sm">{district.name}</span>
+                            </label>
+                          ))
+                        ) : (
+                          <div className="px-3 py-2 text-sm text-gray-500">ไม่พบอำเภอที่ค้นหา</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
 
           {/* Color Pickers */}
@@ -346,6 +483,7 @@ export default function Home() {
           onAreaColorsChange={setAreaColors}
           onMapReady={() => setIsLoading(false)}
           selectedProvinces={selectedProvinces}
+          selectedDistricts={selectedDistricts}
           borderColor={borderColor}
         />
 

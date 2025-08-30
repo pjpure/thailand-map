@@ -14,6 +14,7 @@ interface SimpleMapProps extends Readonly<{}> {
   onAreaColorsChange: (colors: Map<string, string>) => void;
   onMapReady?: () => void;
   selectedProvinces?: string[]; // Array of province codes to filter districts
+  selectedDistricts?: string[]; // Array of district codes to filter subdistricts
   borderColor?: string; // Custom border color
 }
 
@@ -24,6 +25,7 @@ export default function SimpleMap({
   onAreaColorsChange,
   onMapReady,
   selectedProvinces = [],
+  selectedDistricts = [],
   borderColor = '#000000'
 }: SimpleMapProps) {
   const mapRef = useRef<L.Map | null>(null);
@@ -31,6 +33,7 @@ export default function SimpleMap({
   const currentLayerRef = useRef<L.GeoJSON | null>(null);
   const labelsLayerRef = useRef<L.LayerGroup | null>(null);
   const provinceBordersRef = useRef<L.GeoJSON | null>(null);
+  const districtBordersRef = useRef<L.GeoJSON | null>(null);
   const selectedColorRef = useRef<string>(selectedColor);
   const areaColorsRef = useRef<Map<string, string>>(areaColors);
 
@@ -79,17 +82,18 @@ export default function SimpleMap({
     return () => {
       if (mapRef.current) {
         removeProvinceBorders();
+        removeDistrictBorders();
         mapRef.current.remove();
         mapRef.current = null;
       }
     };
   }, []);
 
-  // Load data when level changes or selected provinces change
+  // Load data when level changes or selected provinces/districts change
   useEffect(() => {
     if (!mapRef.current) return;
     loadLevelData();
-  }, [currentLevel, selectedProvinces]);
+  }, [currentLevel, selectedProvinces, selectedDistricts]);
 
   // Update colors when areaColors changes
   useEffect(() => {
@@ -107,6 +111,14 @@ export default function SimpleMap({
         opacity: 1,
       });
     }
+    // Also update district borders if they exist
+    if (currentLevel === 'subdistricts' && districtBordersRef.current && mapRef.current) {
+      districtBordersRef.current.setStyle({
+        color: borderColor,
+        weight: 2,
+        opacity: 1,
+      });
+    }
   }, [borderColor]);
 
   const loadLevelData = async () => {
@@ -116,11 +128,16 @@ export default function SimpleMap({
 
       if (mapRef.current) {
         displayAreas(data);
-        // Load province borders overlay for district level
+        // Load borders overlay based on level
         if (currentLevel === 'districts') {
           await loadProvinceBorders();
+          removeDistrictBorders();
+        } else if (currentLevel === 'subdistricts') {
+          await loadDistrictBorders();
+          removeProvinceBorders();
         } else {
           removeProvinceBorders();
+          removeDistrictBorders();
         }
         onMapReady?.();
       }
@@ -176,6 +193,53 @@ export default function SimpleMap({
     }
   };
 
+  const loadDistrictBorders = async () => {
+    try {
+      const response = await fetch('/data/districts.geojson');
+      const districtsData = await response.json();
+
+      if (mapRef.current) {
+        // Remove existing district borders
+        removeDistrictBorders();
+
+        // Filter districts based on selection
+        let filteredDistrictsData = districtsData;
+        if (selectedDistricts.length > 0) {
+          filteredDistrictsData = {
+            ...districtsData,
+            features: districtsData.features.filter((feature: any) =>
+              selectedDistricts.includes(feature.properties.amp_code)
+            )
+          };
+        }
+
+        // Add district borders with custom color
+        const districtBordersLayer = L.geoJSON(filteredDistrictsData, {
+          style: () => ({
+            fillColor: 'transparent',
+            fillOpacity: 0,
+            color: borderColor, // Use custom border color
+            weight: 2,
+            opacity: 1,
+          }),
+          interactive: false // Make it non-interactive so clicks go through to subdistricts
+        });
+
+        districtBordersLayer.addTo(mapRef.current);
+        districtBordersRef.current = districtBordersLayer;
+      }
+    } catch (error) {
+      console.error('Error loading district borders:', error);
+    }
+  };
+
+  const removeDistrictBorders = () => {
+    if (districtBordersRef.current && mapRef.current) {
+      mapRef.current.removeLayer(districtBordersRef.current);
+      districtBordersRef.current = null;
+    }
+  };
+
   const displayAreas = (geojsonData: any) => {
     if (!mapRef.current || !labelsLayerRef.current) return;
 
@@ -186,6 +250,16 @@ export default function SimpleMap({
         ...geojsonData,
         features: geojsonData.features.filter((feature: any) =>
           selectedProvinces.includes(feature.properties.pro_code)
+        )
+      };
+    }
+    
+    // Filter data based on selected districts for subdistricts level
+    if (currentLevel === 'subdistricts' && selectedDistricts.length > 0) {
+      filteredData = {
+        ...geojsonData,
+        features: geojsonData.features.filter((feature: any) =>
+          selectedDistricts.includes(feature.properties.amp_code)
         )
       };
     }
@@ -389,7 +463,8 @@ export default function SimpleMap({
       case 'districts':
         return true; // Show district names too
       case 'subdistricts':
-        return false; // Too many subdistricts to show all labels
+        // Show subdistrict names only when district filter is active (reduces clutter)
+        return selectedDistricts.length > 0;
       default:
         return true;
     }
