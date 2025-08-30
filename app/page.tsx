@@ -9,6 +9,8 @@ import {
   Search,
   X,
   ChevronDown,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 
 // Dynamically import Map component to avoid SSR issues with Leaflet
@@ -120,6 +122,9 @@ export default function Home() {
 
   // โหมดแก้ไขพาเล็ต
   const [isEditingPalette, setIsEditingPalette] = useState(false);
+
+  // สถานะแสดง/ซ่อนชื่อพื้นที่
+  const [showAreaNames, setShowAreaNames] = useState(true);
 
   const handleClearColors = () => {
     setAreaColors(new Map());
@@ -267,15 +272,34 @@ export default function Home() {
             </p>
           </div>
 
-          {/* Clear Colors Button */}
-          <button
-            onClick={handleClearColors}
-            className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 py-1.5 border border-gray-300 bg-white hover:bg-red-50 hover:border-red-300 transition-all duration-200 rounded-sm flex-shrink-0"
-            title="ล้างสีทั้งหมด"
-          >
-            <RotateCcw className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-red-600" />
-            <span className="text-xs font-medium text-red-600 hidden sm:inline">ล้างสี</span>
-          </button>
+          {/* Action Buttons */}
+          <div className="flex items-center space-x-2">
+            {/* Toggle Area Names Button */}
+            <button
+              onClick={() => setShowAreaNames(!showAreaNames)}
+              className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 py-1.5 border border-gray-300 bg-white hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 rounded-sm flex-shrink-0"
+              title={showAreaNames ? "ซ่อนชื่อพื้นที่" : "แสดงชื่อพื้นที่"}
+            >
+              {showAreaNames ? (
+                <Eye className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-gray-600" />
+              ) : (
+                <EyeOff className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-gray-600" />
+              )}
+              <span className="text-xs font-medium text-gray-600 hidden sm:inline">
+                {showAreaNames ? "ซ่อนชื่อ" : "แสดงชื่อ"}
+              </span>
+            </button>
+
+            {/* Clear Colors Button */}
+            <button
+              onClick={handleClearColors}
+              className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 py-1.5 border border-gray-300 bg-white hover:bg-red-50 hover:border-red-300 transition-all duration-200 rounded-sm flex-shrink-0"
+              title="ล้างสีทั้งหมด"
+            >
+              <RotateCcw className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-red-600" />
+              <span className="text-xs font-medium text-red-600 hidden sm:inline">ล้างสี</span>
+            </button>
+          </div>
         </div>
 
         {/* Second Row: Controls - Stack on mobile */}
@@ -606,6 +630,7 @@ export default function Home() {
           selectedProvinces={selectedProvinces}
           selectedDistricts={selectedDistricts}
           borderColor={borderColor}
+          showAreaNames={showAreaNames}
         />
 
         {/* Loading Indicator */}

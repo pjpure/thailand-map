@@ -16,6 +16,7 @@ interface SimpleMapProps extends Readonly<{}> {
   selectedProvinces?: string[]; // Array of province codes to filter districts
   selectedDistricts?: string[]; // Array of district codes to filter subdistricts
   borderColor?: string; // Custom border color
+  showAreaNames?: boolean; // Toggle for showing/hiding area names
 }
 
 export default function SimpleMap({
@@ -26,7 +27,8 @@ export default function SimpleMap({
   onMapReady,
   selectedProvinces = [],
   selectedDistricts = [],
-  borderColor = '#000000'
+  borderColor = '#000000',
+  showAreaNames = true
 }: SimpleMapProps) {
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -133,6 +135,38 @@ export default function SimpleMap({
   useEffect(() => {
     updateLayerColors();
   }, [areaColors]);
+
+  // Update labels when showAreaNames changes
+  useEffect(() => {
+    if (!mapRef.current || !labelsLayerRef.current || !currentLayerRef.current) return;
+
+    if (showAreaNames) {
+      // Show labels immediately by recreating them from current layer
+      labelsLayerRef.current.clearLayers();
+      currentLayerRef.current.eachLayer((layer: any) => {
+        if (layer.feature && layer.feature.properties) {
+          const areaName = getAreaName(layer.feature, currentLevel);
+
+          if (shouldShowLabel(currentLevel)) {
+            const labelPosition = (layer as any).getBounds().getCenter();
+            const labelSize = getLabelSize(currentLevel);
+            const marker = L.marker(labelPosition, {
+              icon: L.divIcon({
+                className: 'area-label',
+                html: `<div style="color: #000; font-size: ${labelSize}px; font-weight: bold; text-align: center; pointer-events: none; text-shadow: 1px 1px 2px rgba(255,255,255,0.8);">${areaName}</div>`,
+                iconSize: [120, 24],
+                iconAnchor: [60, 12]
+              })
+            });
+            labelsLayerRef.current!.addLayer(marker);
+          }
+        }
+      });
+    } else {
+      // Hide all labels immediately
+      labelsLayerRef.current.clearLayers();
+    }
+  }, [showAreaNames]);
 
   // Update border colors when borderColor changes
   useEffect(() => {
@@ -554,6 +588,8 @@ export default function SimpleMap({
   };
 
   const shouldShowLabel = (level: AdminLevel): boolean => {
+    if (!showAreaNames) return false; // Hide labels if toggle is off
+
     switch (level) {
       case 'provinces':
         return true;
