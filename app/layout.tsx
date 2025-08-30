@@ -13,8 +13,11 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Interactive Thailand Map",
-  description: "Explore Thailand's administrative divisions with this interactive map showing provinces, districts, subdistricts, and regions with customizable visualization options.",
+  title: "แผนที่ประเทศไทย",
+  description: "แผนที่ประเทศไทย แสดงจังหวัด อำเภอ ตำบล ภูมิภาค จัดการสีพื้นที่",
+  icons: {
+    icon: '/favicon.ico',
+  },
 };
 
 export default function RootLayout({

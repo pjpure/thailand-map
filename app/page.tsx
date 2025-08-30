@@ -1,11 +1,18 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect } from 'react';
-import dynamic from 'next/dynamic';
-import { Palette, Layers, RotateCcw, Search, X, ChevronDown } from 'lucide-react';
+import React, { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
+import {
+  Palette,
+  Layers,
+  RotateCcw,
+  Search,
+  X,
+  ChevronDown,
+} from "lucide-react";
 
 // Dynamically import Map component to avoid SSR issues with Leaflet
-const SimpleMap = dynamic(() => import('@/components/SimpleMap'), {
+const SimpleMap = dynamic(() => import("@/components/SimpleMap"), {
   ssr: false,
   loading: () => (
     <div className="w-full h-full bg-white flex items-center justify-center">
@@ -17,36 +24,37 @@ const SimpleMap = dynamic(() => import('@/components/SimpleMap'), {
   ),
 });
 
-type AdminLevel = 'provinces' | 'districts' | 'subdistricts';
+type AdminLevel = "provinces" | "districts" | "subdistricts";
 
 const ADMIN_LEVELS: { value: AdminLevel; label: string }[] = [
-  { value: 'provinces', label: 'จังหวัด (77)' },
-  { value: 'districts', label: 'อำเภอ (928)' },
-  { value: 'subdistricts', label: 'ตำบล (7,367)' },
+  { value: "provinces", label: "จังหวัด (77)" },
+  { value: "districts", label: "อำเภอ (928)" },
+  { value: "subdistricts", label: "ตำบล (7,367)" },
 ];
 
 type ProvinceItem = { code: string; name: string };
 type DistrictItem = { code: string; name: string; provinceCode: string };
 
 // localStorage functions
-const PALETTE_STORAGE_KEY = 'thailand-map-palette';
-const SELECTED_COLOR_STORAGE_KEY = 'thailand-map-selected-color';
+const PALETTE_STORAGE_KEY = "thailand-map-palette";
+const SELECTED_COLOR_STORAGE_KEY = "thailand-map-selected-color";
 
 const getStoredPalette = (): string[] => {
-  if (typeof window === 'undefined') return ['#ff3b30', '#34c759', '#007aff', '#ffcc00', '#8e8e93'];
+  if (typeof window === "undefined")
+    return ["#ff3b30", "#34c759", "#007aff", "#ffcc00", "#8e8e93"];
   const stored = localStorage.getItem(PALETTE_STORAGE_KEY);
   if (stored) {
     try {
       return JSON.parse(stored);
     } catch (e) {
-      console.warn('Error parsing stored palette:', e);
+      console.warn("Error parsing stored palette:", e);
     }
   }
-  return ['#ff3b30', '#34c759', '#007aff', '#ffcc00', '#8e8e93']; // Default palette
+  return ["#ff3b30", "#34c759", "#007aff", "#ffcc00", "#8e8e93"]; // Default palette
 };
 
 const getStoredSelectedColor = (defaultPalette: string[]): string => {
-  if (typeof window === 'undefined') return defaultPalette[0];
+  if (typeof window === "undefined") return defaultPalette[0];
   const stored = localStorage.getItem(SELECTED_COLOR_STORAGE_KEY);
   if (stored && defaultPalette.includes(stored)) {
     return stored;
@@ -55,20 +63,26 @@ const getStoredSelectedColor = (defaultPalette: string[]): string => {
 };
 
 const savePalette = (palette: string[]) => {
-  if (typeof window !== 'undefined') {
+  if (typeof window !== "undefined") {
     localStorage.setItem(PALETTE_STORAGE_KEY, JSON.stringify(palette));
   }
 };
 
 const saveSelectedColor = (color: string) => {
-  if (typeof window !== 'undefined') {
+  if (typeof window !== "undefined") {
     localStorage.setItem(SELECTED_COLOR_STORAGE_KEY, color);
   }
 };
 
 export default function Home() {
   // Initialize with default values to avoid hydration mismatch
-  const defaultPalette = ['#ff3b30', '#34c759', '#007aff', '#ffcc00', '#8e8e93'];
+  const defaultPalette = [
+    "#ff3b30",
+    "#34c759",
+    "#007aff",
+    "#ffcc00",
+    "#8e8e93",
+  ];
   const [palette, setPalette] = useState<string[]>(defaultPalette);
   const [selectedColor, setSelectedColor] = useState(defaultPalette[0]);
   const [isHydrated, setIsHydrated] = useState(false);
@@ -83,22 +97,26 @@ export default function Home() {
     setIsHydrated(true);
   }, []);
 
-  const [currentLevel, setCurrentLevel] = useState<AdminLevel>('provinces');
+  const [currentLevel, setCurrentLevel] = useState<AdminLevel>("provinces");
   const [isLoading, setIsLoading] = useState(true);
   const [areaColors, setAreaColors] = useState<Map<string, string>>(new Map());
   const [selectedProvinces, setSelectedProvinces] = useState<string[]>([]);
-  const [availableProvinces, setAvailableProvinces] = useState<ProvinceItem[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [availableProvinces, setAvailableProvinces] = useState<ProvinceItem[]>(
+    []
+  );
+  const [searchTerm, setSearchTerm] = useState("");
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
   // District selection for subdistricts level
   const [selectedDistricts, setSelectedDistricts] = useState<string[]>([]);
-  const [availableDistricts, setAvailableDistricts] = useState<DistrictItem[]>([]);
-  const [districtSearchTerm, setDistrictSearchTerm] = useState('');
+  const [availableDistricts, setAvailableDistricts] = useState<DistrictItem[]>(
+    []
+  );
+  const [districtSearchTerm, setDistrictSearchTerm] = useState("");
   const [isDistrictDropdownOpen, setIsDistrictDropdownOpen] = useState(false);
 
   // === เปลี่ยน 1 ปุ่มเป็น Color Picker ===
-  const [borderColor, setBorderColor] = useState('#000000');
+  const [borderColor, setBorderColor] = useState("#000000");
 
   // โหมดแก้ไขพาเล็ต
   const [isEditingPalette, setIsEditingPalette] = useState(false);
@@ -111,9 +129,9 @@ export default function Home() {
   useEffect(() => {
     const loadProvinces = async () => {
       try {
-        const response = await fetch('/data/provinces.geojson');
-        const data = await response.json() as {
-          features: Array<{ properties: { pro_code: string; pro_th: string } }>
+        const response = await fetch("/data/provinces.geojson");
+        const data = (await response.json()) as {
+          features: Array<{ properties: { pro_code: string; pro_th: string } }>;
         };
         const provinces: ProvinceItem[] = data.features
           .map((feature) => ({
@@ -123,15 +141,17 @@ export default function Home() {
           .sort((a, b) => a.name.localeCompare(b.name));
         setAvailableProvinces(provinces);
       } catch (error) {
-        console.error('Error loading provinces:', error);
+        console.error("Error loading provinces:", error);
       }
     };
 
     const loadDistricts = async () => {
       try {
-        const response = await fetch('/data/districts.geojson');
-        const data = await response.json() as {
-          features: Array<{ properties: { amp_code: string; amp_th: string; pro_code: string } }>
+        const response = await fetch("/data/districts.geojson");
+        const data = (await response.json()) as {
+          features: Array<{
+            properties: { amp_code: string; amp_th: string; pro_code: string };
+          }>;
         };
         const districts: DistrictItem[] = data.features
           .map((feature) => ({
@@ -142,7 +162,7 @@ export default function Home() {
           .sort((a, b) => a.name.localeCompare(b.name));
         setAvailableDistricts(districts);
       } catch (error) {
-        console.error('Error loading districts:', error);
+        console.error("Error loading districts:", error);
       }
     };
 
@@ -154,16 +174,16 @@ export default function Home() {
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Element;
-      if (!target.closest('.province-dropdown')) {
+      if (!target.closest(".province-dropdown")) {
         setIsDropdownOpen(false);
       }
-      if (!target.closest('.district-dropdown')) {
+      if (!target.closest(".district-dropdown")) {
         setIsDistrictDropdownOpen(false);
       }
     };
 
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   // Filter provinces based on search term
@@ -178,7 +198,9 @@ export default function Home() {
 
   const handleProvinceToggle = (provinceCode: string) => {
     setSelectedProvinces((prev) =>
-      prev.includes(provinceCode) ? prev.filter((code) => code !== provinceCode) : [...prev, provinceCode]
+      prev.includes(provinceCode)
+        ? prev.filter((code) => code !== provinceCode)
+        : [...prev, provinceCode]
     );
   };
 
@@ -193,7 +215,9 @@ export default function Home() {
   // District selection handlers
   const handleDistrictToggle = (districtCode: string) => {
     setSelectedDistricts((prev) =>
-      prev.includes(districtCode) ? prev.filter((code) => code !== districtCode) : [...prev, districtCode]
+      prev.includes(districtCode)
+        ? prev.filter((code) => code !== districtCode)
+        : [...prev, districtCode]
     );
   };
 
@@ -230,8 +254,16 @@ export default function Home() {
       <header className="bg-white border-b-2 border-gray-800 px-4 py-2 shadow-sm">
         <div className="flex items-center justify-between mb-2">
           <div>
-            <h1 className="text-lg font-bold text-gray-800">แผนที่ประเทศไทย</h1>
-            <p className="text-xs text-gray-500 leading-none">คลิก 1 ครั้ง = ลงสี | ดับเบิลคลิก = ลบสี | ลงสีได้หลายพื้นที่</p>
+            <div className="flex items-center space-x-1.5">
+              <img src="/favicon.ico" alt="" className="w-8 h-8 rounded-md" />{" "}
+              <h1 className="text-lg font-bold text-gray-800">
+                แผนที่ประเทศไทย
+              </h1>
+            </div>
+
+            <p className="text-xs text-gray-500 leading-none mt-2">
+              คลิก 1 ครั้ง = ลงสี | ดับเบิลคลิก = ลบสี | ลงสีได้หลายพื้นที่
+            </p>
           </div>
 
           {/* Clear Colors Button */}
@@ -265,10 +297,12 @@ export default function Home() {
             </select>
 
             {/* Province Filter - only show for districts level */}
-            {currentLevel === 'districts' && (
+            {currentLevel === "districts" && (
               <>
                 <div className="flex items-center space-x-1.5">
-                  <span className="text-sm font-medium text-gray-700">จังหวัด:</span>
+                  <span className="text-sm font-medium text-gray-700">
+                    จังหวัด:
+                  </span>
                 </div>
                 <div className="relative province-dropdown">
                   {/* Selected provinces display and toggle button */}
@@ -278,12 +312,17 @@ export default function Home() {
                   >
                     <span className="truncate">
                       {selectedProvinces.length === 0
-                        ? 'เลือกจังหวัด'
+                        ? "เลือกจังหวัด"
                         : selectedProvinces.length === 1
-                          ? availableProvinces.find((p) => p.code === selectedProvinces[0])?.name
+                          ? availableProvinces.find(
+                            (p) => p.code === selectedProvinces[0]
+                          )?.name
                           : `${selectedProvinces.length} จังหวัด`}
                     </span>
-                    <ChevronDown className={`h-4 w-4 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
+                    <ChevronDown
+                      className={`h-4 w-4 transition-transform ${isDropdownOpen ? "rotate-180" : ""
+                        }`}
+                    />
                   </button>
 
                   {/* Dropdown */}
@@ -303,7 +342,7 @@ export default function Home() {
                           {searchTerm && (
                             <X
                               className="absolute right-2 top-2 h-4 w-4 text-gray-400 cursor-pointer hover:text-gray-600"
-                              onClick={() => setSearchTerm('')}
+                              onClick={() => setSearchTerm("")}
                             />
                           )}
                         </div>
@@ -330,18 +369,27 @@ export default function Home() {
                       <div className="max-h-40 overflow-y-auto">
                         {filteredProvinces.length > 0 ? (
                           filteredProvinces.map((province) => (
-                            <label key={province.code} className="flex items-center px-3 py-2 hover:bg-gray-100 cursor-pointer">
+                            <label
+                              key={province.code}
+                              className="flex items-center px-3 py-2 hover:bg-gray-100 cursor-pointer"
+                            >
                               <input
                                 type="checkbox"
-                                checked={selectedProvinces.includes(province.code)}
-                                onChange={() => handleProvinceToggle(province.code)}
+                                checked={selectedProvinces.includes(
+                                  province.code
+                                )}
+                                onChange={() =>
+                                  handleProvinceToggle(province.code)
+                                }
                                 className="mr-2"
                               />
                               <span className="text-sm">{province.name}</span>
                             </label>
                           ))
                         ) : (
-                          <div className="px-3 py-2 text-sm text-gray-500">ไม่พบจังหวัดที่ค้นหา</div>
+                          <div className="px-3 py-2 text-sm text-gray-500">
+                            ไม่พบจังหวัดที่ค้นหา
+                          </div>
                         )}
                       </div>
                     </div>
@@ -351,25 +399,34 @@ export default function Home() {
             )}
 
             {/* District Filter - only show for subdistricts level */}
-            {currentLevel === 'subdistricts' && (
+            {currentLevel === "subdistricts" && (
               <>
                 <div className="flex items-center space-x-1.5">
-                  <span className="text-sm font-medium text-gray-700">อำเภอ:</span>
+                  <span className="text-sm font-medium text-gray-700">
+                    อำเภอ:
+                  </span>
                 </div>
                 <div className="relative district-dropdown">
                   {/* Selected districts display and toggle button */}
                   <button
-                    onClick={() => setIsDistrictDropdownOpen(!isDistrictDropdownOpen)}
+                    onClick={() =>
+                      setIsDistrictDropdownOpen(!isDistrictDropdownOpen)
+                    }
                     className="px-2.5 py-1.5 border border-gray-300 bg-white text-sm font-medium focus:outline-none focus:border-blue-400 rounded-sm hover:border-gray-400 transition-colors min-w-[180px] flex items-center justify-between"
                   >
                     <span className="truncate">
                       {selectedDistricts.length === 0
-                        ? 'เลือกอำเภอ'
+                        ? "เลือกอำเภอ"
                         : selectedDistricts.length === 1
-                          ? availableDistricts.find((d) => d.code === selectedDistricts[0])?.name
+                          ? availableDistricts.find(
+                            (d) => d.code === selectedDistricts[0]
+                          )?.name
                           : `${selectedDistricts.length} อำเภอ`}
                     </span>
-                    <ChevronDown className={`h-4 w-4 transition-transform ${isDistrictDropdownOpen ? 'rotate-180' : ''}`} />
+                    <ChevronDown
+                      className={`h-4 w-4 transition-transform ${isDistrictDropdownOpen ? "rotate-180" : ""
+                        }`}
+                    />
                   </button>
 
                   {/* Dropdown */}
@@ -383,13 +440,15 @@ export default function Home() {
                             type="text"
                             placeholder="ค้นหาอำเภอ..."
                             value={districtSearchTerm}
-                            onChange={(e) => setDistrictSearchTerm(e.target.value)}
+                            onChange={(e) =>
+                              setDistrictSearchTerm(e.target.value)
+                            }
                             className="w-full pl-8 pr-2 py-1 border border-gray-300 text-sm focus:outline-none focus:border-gray-500"
                           />
                           {districtSearchTerm && (
                             <X
                               className="absolute right-2 top-2 h-4 w-4 text-gray-400 cursor-pointer hover:text-gray-600"
-                              onClick={() => setDistrictSearchTerm('')}
+                              onClick={() => setDistrictSearchTerm("")}
                             />
                           )}
                         </div>
@@ -416,18 +475,27 @@ export default function Home() {
                       <div className="max-h-40 overflow-y-auto">
                         {filteredDistricts.length > 0 ? (
                           filteredDistricts.map((district) => (
-                            <label key={district.code} className="flex items-center px-3 py-2 hover:bg-gray-100 cursor-pointer">
+                            <label
+                              key={district.code}
+                              className="flex items-center px-3 py-2 hover:bg-gray-100 cursor-pointer"
+                            >
                               <input
                                 type="checkbox"
-                                checked={selectedDistricts.includes(district.code)}
-                                onChange={() => handleDistrictToggle(district.code)}
+                                checked={selectedDistricts.includes(
+                                  district.code
+                                )}
+                                onChange={() =>
+                                  handleDistrictToggle(district.code)
+                                }
                                 className="mr-2"
                               />
                               <span className="text-sm">{district.name}</span>
                             </label>
                           ))
                         ) : (
-                          <div className="px-3 py-2 text-sm text-gray-500">ไม่พบอำเภอที่ค้นหา</div>
+                          <div className="px-3 py-2 text-sm text-gray-500">
+                            ไม่พบอำเภอที่ค้นหา
+                          </div>
                         )}
                       </div>
                     </div>
@@ -443,7 +511,9 @@ export default function Home() {
             <div className="flex items-center space-x-3">
               <div className="flex items-center space-x-1.5">
                 <Palette className="h-4 w-4 text-gray-600" />
-                <span className="text-sm font-medium text-gray-700">สีพื้นที่:</span>
+                <span className="text-sm font-medium text-gray-700">
+                  สีพื้นที่:
+                </span>
               </div>
 
               {/* ปุ่มสลับโหมดแก้ไขสี */}
@@ -451,12 +521,12 @@ export default function Home() {
                 type="button"
                 onClick={() => setIsEditingPalette((v) => !v)}
                 className={`px-2 py-1 text-xs border rounded-sm transition-colors ${isEditingPalette
-                  ? 'border-blue-500 text-blue-600 bg-blue-50'
-                  : 'border-gray-300 text-gray-700 bg-white hover:bg-gray-100'
+                  ? "border-blue-500 text-blue-600 bg-blue-50"
+                  : "border-gray-300 text-gray-700 bg-white hover:bg-gray-100"
                   }`}
                 title="แก้ไขชุดสี"
               >
-                {isEditingPalette ? 'เสร็จสิ้น' : 'แก้ไขสี'}
+                {isEditingPalette ? "เสร็จสิ้น" : "แก้ไขสี"}
               </button>
 
               {/* ปุ่มเลือกสี + ช่องแก้ไขสี */}
@@ -469,8 +539,8 @@ export default function Home() {
                         saveSelectedColor(color);
                       }}
                       className={`w-7 h-7 border transition-all rounded-sm ${selectedColor === color
-                        ? 'border-gray-700 ring-2 ring-blue-400 ring-offset-1 scale-105'
-                        : 'border-gray-300 hover:border-gray-500 hover:scale-105'
+                        ? "border-gray-700 ring-2 ring-blue-400 ring-offset-1 scale-105"
+                        : "border-gray-300 hover:border-gray-500 hover:scale-105"
                         }`}
                       style={{ backgroundColor: color }}
                       title={color}
@@ -479,7 +549,9 @@ export default function Home() {
                       <input
                         type="color"
                         value={color}
-                        onChange={(e) => updatePaletteColor(idx, e.target.value)}
+                        onChange={(e) =>
+                          updatePaletteColor(idx, e.target.value)
+                        }
                         className="mt-1 w-8 h-6 p-0 border border-gray-300 rounded-sm"
                         aria-label={`แก้ไขสีที่ ${idx + 1}`}
                       />
@@ -493,11 +565,15 @@ export default function Home() {
             <div className="flex items-center space-x-3">
               <div className="flex items-center space-x-1.5">
                 <div className="h-4 w-4 border-2 border-gray-600 rounded-sm bg-white"></div>
-                <span className="text-sm font-medium text-gray-700">สีเส้น:</span>
+                <span className="text-sm font-medium text-gray-700">
+                  สีเส้น:
+                </span>
               </div>
 
               {(() => {
-                const isCustomBorder = !['#808080', '#000000'].includes(borderColor.toLowerCase());
+                const isCustomBorder = !["#808080", "#000000"].includes(
+                  borderColor.toLowerCase()
+                );
                 return (
                   <div className="flex items-center space-x-1.5">
                     {/* Color Picker (แทนที่ปุ่มสีขาวเดิม) */}
@@ -509,14 +585,13 @@ export default function Home() {
                         onChange={(e) => setBorderColor(e.target.value)}
                         className={`appearance-none w-7 h-7 p-0 border-2 rounded-sm cursor-pointer 
                           ${isCustomBorder
-                            ? 'border-gray-700 ring-2 ring-green-400 ring-offset-1 scale-105'
-                            : 'border-gray-300 hover:border-gray-500 hover:scale-105'
+                            ? "border-gray-700 ring-2 ring-green-400 ring-offset-1 scale-105"
+                            : "border-gray-300 hover:border-gray-500 hover:scale-105"
                           }`}
                         title={borderColor}
                         aria-label="เลือกสีเส้นแบบกำหนดเอง"
                       />
                     </label>
-
                   </div>
                 );
               })()}
