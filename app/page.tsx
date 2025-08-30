@@ -161,6 +161,215 @@ const importFromJSON = (file: File): Promise<MapConfig> => {
   });
 };
 
+// CSV import functions
+const parseCSV = (csvText: string): { code: string; color: string }[] => {
+  const lines = csvText.trim().split('\n');
+  const results: { code: string; color: string }[] = [];
+
+  // Skip header row
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+
+    // Parse CSV line (handle quoted fields)
+    const fields: string[] = [];
+    let current = '';
+    let inQuotes = false;
+
+    for (let j = 0; j < line.length; j++) {
+      const char = line[j];
+      if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === ',' && !inQuotes) {
+        fields.push(current);
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    fields.push(current); // Add last field
+
+    if (fields.length >= 3) {
+      const code = fields[0].trim();
+      const color = fields[fields.length - 1].trim(); // Color is always the last column
+      if (code && color) {
+        results.push({ code, color });
+      }
+    }
+  }
+
+  return results;
+};
+
+const importFromCSV = (file: File): Promise<Map<string, string>> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target?.result as string;
+        const data = parseCSV(text);
+        const colorMap = new Map<string, string>();
+
+        data.forEach(({ code, color }) => {
+          if (color && color !== '') {
+            colorMap.set(code, color);
+          }
+        });
+
+        resolve(colorMap);
+      } catch (error) {
+        reject(error);
+      }
+    };
+    reader.onerror = () => reject(new Error("Failed to read CSV file"));
+    reader.readAsText(file, 'utf-8');
+  });
+};
+
+// Export functions for specific administrative levels
+const exportProvinces = (
+  areaColors: Map<string, string>,
+  availableProvinces: ProvinceItem[]
+) => {
+  // Include all provinces, with empty color if no color is set, sorted by name
+  const allProvinces = availableProvinces
+    .map((province) => ({
+      code: province.code,
+      name: province.name,
+      color: areaColors.get(province.code) || "",
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'th'));
+
+  // Create CSV content
+  const csvHeader = "รหัส,ชื่อจังหวัด,สี\n";
+  const csvRows = allProvinces
+    .map((province) => `${province.code},"${province.name}",${province.color}`)
+    .join("\n");
+  const csvContent = csvHeader + csvRows;
+
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const link = document.createElement("a");
+
+  if (link.download !== undefined) {
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `จังหวัด-${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+};
+
+const exportDistricts = (
+  areaColors: Map<string, string>,
+  availableDistricts: DistrictItem[],
+  availableProvinces: ProvinceItem[],
+  selectedProvinces: string[]
+) => {
+  // Filter districts based on selected provinces, or include all if no filter
+  const filteredDistricts = selectedProvinces.length > 0
+    ? availableDistricts.filter(district => selectedProvinces.includes(district.provinceCode))
+    : availableDistricts;
+
+  // Include all filtered districts, with empty color if no color is set, sorted by province then district name
+  const allDistricts = filteredDistricts
+    .map((district) => {
+      const province = availableProvinces.find(p => p.code === district.provinceCode);
+      return {
+        code: district.code,
+        name: district.name,
+        provinceCode: district.provinceCode,
+        provinceName: province?.name || "",
+        color: areaColors.get(district.code) || "",
+      };
+    })
+    .sort((a, b) => {
+      // Sort by province name first, then by district name
+      const provinceCompare = a.provinceName.localeCompare(b.provinceName, 'th');
+      return provinceCompare !== 0 ? provinceCompare : a.name.localeCompare(b.name, 'th');
+    });
+
+  // Create CSV content - District data with province name
+  const csvHeader = "รหัสอำเภอ,ชื่ออำเภอ,ชื่อจังหวัด,สี\n";
+  const csvRows = allDistricts
+    .map((district) => `${district.code},"${district.name}","${district.provinceName}",${district.color}`)
+    .join("\n");
+  const csvContent = csvHeader + csvRows;
+
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const link = document.createElement("a");
+
+  if (link.download !== undefined) {
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `อำเภอ-${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+};
+
+const exportSubdistricts = (
+  areaColors: Map<string, string>,
+  availableSubdistricts: SubdistrictItem[],
+  availableDistricts: DistrictItem[],
+  availableProvinces: ProvinceItem[],
+  selectedDistricts: string[]
+) => {
+  // Filter subdistricts based on selected districts, or include all if no filter
+  const filteredSubdistricts = selectedDistricts.length > 0
+    ? availableSubdistricts.filter(subdistrict => selectedDistricts.includes(subdistrict.districtCode))
+    : availableSubdistricts;
+
+  // Include all filtered subdistricts, with empty color if no color is set, sorted by province, district, then subdistrict name
+  const allSubdistricts = filteredSubdistricts
+    .map((subdistrict) => {
+      const district = availableDistricts.find(d => d.code === subdistrict.districtCode);
+      const province = availableProvinces.find(p => p.code === subdistrict.provinceCode);
+      return {
+        code: subdistrict.code,
+        name: subdistrict.name,
+        districtCode: subdistrict.districtCode,
+        districtName: district?.name || "",
+        provinceCode: subdistrict.provinceCode,
+        provinceName: province?.name || "",
+        color: areaColors.get(subdistrict.code) || "",
+      };
+    })
+    .sort((a, b) => {
+      // Sort by province name first, then district name, then subdistrict name
+      const provinceCompare = a.provinceName.localeCompare(b.provinceName, 'th');
+      if (provinceCompare !== 0) return provinceCompare;
+
+      const districtCompare = a.districtName.localeCompare(b.districtName, 'th');
+      if (districtCompare !== 0) return districtCompare;
+
+      return a.name.localeCompare(b.name, 'th');
+    });
+
+  // Create CSV content - Subdistrict data with district name
+  const csvHeader = "รหัสตำบล,ชื่อตำบล,ชื่ออำเภอ,สี\n";
+  const csvRows = allSubdistricts
+    .map((subdistrict) => `${subdistrict.code},"${subdistrict.name}","${subdistrict.districtName}",${subdistrict.color}`)
+    .join("\n");
+  const csvContent = csvHeader + csvRows;
+
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const link = document.createElement("a");
+
+  if (link.download !== undefined) {
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `ตำบล-${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+};
+
 export default function Home() {
   // Initialize with default values to avoid hydration mismatch
   const defaultPalette = [
@@ -211,6 +420,12 @@ export default function Home() {
   const [districtSearchTerm, setDistrictSearchTerm] = useState("");
   const [isDistrictDropdownOpen, setIsDistrictDropdownOpen] = useState(false);
 
+  // Export dropdown state
+  const [isExportDropdownOpen, setIsExportDropdownOpen] = useState(false);
+
+  // Import dropdown state
+  const [isImportDropdownOpen, setIsImportDropdownOpen] = useState(false);
+
   // Subdistrict data for comprehensive export
   const [availableSubdistricts, setAvailableSubdistricts] = useState<SubdistrictItem[]>(
     []
@@ -248,7 +463,7 @@ export default function Home() {
     exportConfig(currentLevel, areaColors, selectedProvinces, selectedDistricts, borderColor, showAreaNames);
   };
 
-  const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleJSONImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -271,6 +486,35 @@ export default function Home() {
     } catch (error) {
       console.error("Import error:", error);
       alert("เกิดข้อผิดพลาดในการนำเข้าไฟล์ JSON กรุณาตรวจสอบรูปแบบไฟล์");
+      event.target.value = "";
+    }
+  };
+
+  const handleCSVImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const colorMap = await importFromCSV(file);
+
+      // Merge imported colors with existing colors
+      setAreaColors((prevColors) => {
+        const newColors = new Map(prevColors);
+        colorMap.forEach((color, code) => {
+          newColors.set(code, color);
+        });
+        return newColors;
+      });
+
+      setIsSaved(false);
+
+      // Reset file input
+      event.target.value = "";
+
+      alert(`นำเข้าสีสำเร็จ: ${colorMap.size} พื้นที่`);
+    } catch (error) {
+      console.error("CSV Import error:", error);
+      alert("เกิดข้อผิดพลาดในการนำเข้าไฟล์ CSV กรุณาตรวจสอบรูปแบบไฟล์");
       event.target.value = "";
     }
   };
@@ -352,6 +596,12 @@ export default function Home() {
       }
       if (!target.closest(".district-dropdown")) {
         setIsDistrictDropdownOpen(false);
+      }
+      if (!target.closest(".export-dropdown")) {
+        setIsExportDropdownOpen(false);
+      }
+      if (!target.closest(".import-dropdown")) {
+        setIsImportDropdownOpen(false);
       }
     };
 
@@ -465,28 +715,135 @@ export default function Home() {
               </span>
             </button>
 
-            {/* Export Button */}
-            <button
-              onClick={handleExport}
-              className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 py-1.5 border border-gray-300 bg-white hover:bg-blue-50 hover:border-blue-300 transition-all duration-200 rounded-sm flex-shrink-0"
-              title="ส่งออกการตั้งค่าเป็น JSON"
-            >
-              <Download className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-blue-600" />
-              <span className="text-xs font-medium text-blue-600 hidden sm:inline">ส่งออก</span>
-            </button>
+            {/* Export Dropdown */}
+            <div className="relative export-dropdown">
+              <button
+                onClick={() => setIsExportDropdownOpen(!isExportDropdownOpen)}
+                className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 py-1.5 border border-gray-300 bg-white hover:bg-blue-50 hover:border-blue-300 transition-all duration-200 rounded-sm flex-shrink-0"
+                title="เลือกประเภทข้อมูลที่จะส่งออก"
+              >
+                <Download className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-blue-600" />
+                <span className="text-xs font-medium text-blue-600 hidden sm:inline">ส่งออก</span>
+                <ChevronDown
+                  className={`h-3 w-3 sm:h-3.5 sm:w-3.5 text-blue-600 transition-transform ${isExportDropdownOpen ? "rotate-180" : ""
+                    }`}
+                />
+              </button>
 
-            {/* Import Button */}
-            <label className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 py-1.5 border border-gray-300 bg-white hover:bg-orange-50 hover:border-orange-300 transition-all duration-200 rounded-sm flex-shrink-0 cursor-pointer"
-              title="นำเข้าการตั้งค่าจาก JSON">
-              <Upload className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-orange-600" />
-              <span className="text-xs font-medium text-orange-600 hidden sm:inline">นำเข้า</span>
-              <input
-                type="file"
-                accept=".json"
-                onChange={handleImport}
-                className="hidden"
-              />
-            </label>
+              {/* Dropdown Menu */}
+              {isExportDropdownOpen && (
+                <div className="absolute top-full left-0 mt-1 bg-white border border-gray-300 rounded-sm shadow-lg min-w-[160px] z-500">
+                  <div className="py-1">
+                    {/* Export Config Option */}
+                    <button
+                      onClick={() => {
+                        handleExport();
+                        setIsExportDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 flex items-center space-x-2"
+                    >
+                      <Download className="h-3 w-3 text-gray-500" />
+                      <span>ส่งออกการตั้งค่า</span>
+                    </button>
+
+                    {/* Separator */}
+                    <div className="border-t border-gray-200 my-1"></div>
+
+                    {/* Export Provinces */}
+                    <button
+                      onClick={() => {
+                        exportProvinces(areaColors, availableProvinces);
+                        setIsExportDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 flex items-center space-x-2"
+                    >
+                      <div className="w-3 h-3 border border-gray-400 rounded-sm bg-red-200"></div>
+                      <span>ส่งออกจังหวัด</span>
+                    </button>
+
+                    {/* Export Districts */}
+                    <button
+                      onClick={() => {
+                        exportDistricts(areaColors, availableDistricts, availableProvinces, selectedProvinces);
+                        setIsExportDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 flex items-center space-x-2"
+                    >
+                      <div className="w-3 h-3 border border-gray-400 rounded-sm bg-green-200"></div>
+                      <span>ส่งออกอำเภอ</span>
+                    </button>
+
+                    {/* Export Subdistricts */}
+                    <button
+                      onClick={() => {
+                        exportSubdistricts(areaColors, availableSubdistricts, availableDistricts, availableProvinces, selectedDistricts);
+                        setIsExportDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 flex items-center space-x-2"
+                    >
+                      <div className="w-3 h-3 border border-gray-400 rounded-sm bg-blue-200"></div>
+                      <span>ส่งออกตำบล</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Import Dropdown */}
+            <div className="relative import-dropdown">
+              <button
+                onClick={() => setIsImportDropdownOpen(!isImportDropdownOpen)}
+                className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 py-1.5 border border-gray-300 bg-white hover:bg-orange-50 hover:border-orange-300 transition-all duration-200 rounded-sm flex-shrink-0"
+                title="เลือกประเภทไฟล์ที่จะนำเข้า"
+              >
+                <Upload className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-orange-600" />
+                <span className="text-xs font-medium text-orange-600 hidden sm:inline">นำเข้า</span>
+                <ChevronDown
+                  className={`h-3 w-3 sm:h-3.5 sm:w-3.5 text-orange-600 transition-transform ${isImportDropdownOpen ? "rotate-180" : ""
+                    }`}
+                />
+              </button>
+
+              {/* Dropdown Menu */}
+              {isImportDropdownOpen && (
+                <div className="absolute top-full right-0 mt-1 bg-white border border-gray-300 rounded-sm shadow-lg min-w-[180px] z-500">
+                  <div className="py-1">
+                    {/* Import JSON Config */}
+                    <label className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 flex items-center space-x-2 cursor-pointer">
+                      <Upload className="h-3 w-3 text-gray-500" />
+                      <span>นำเข้าการตั้งค่า (JSON)</span>
+                      <input
+                        type="file"
+                        accept=".json"
+                        onChange={(e) => {
+                          handleJSONImport(e);
+                          setIsImportDropdownOpen(false);
+                        }}
+                        className="hidden"
+                      />
+                    </label>
+
+                    {/* Separator */}
+                    <div className="border-t border-gray-200 my-1"></div>
+
+                    {/* Import CSV Colors */}
+                    <label className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 flex items-center space-x-2 cursor-pointer">
+                      <div className="w-3 h-3 border border-gray-400 rounded-sm bg-yellow-200"></div>
+                      <span>นำเข้าสี (CSV)</span>
+                      <input
+                        type="file"
+                        accept=".csv"
+                        onChange={(e) => {
+                          handleCSVImport(e);
+                          setIsImportDropdownOpen(false);
+                        }}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                </div>
+              )}
+            </div>
 
           </div>
         </div>
