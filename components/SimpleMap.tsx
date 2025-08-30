@@ -1,34 +1,37 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { THAILAND_CONFIG } from '@/lib/types';
 
 type AdminLevel = 'provinces' | 'districts' | 'subdistricts';
 
-interface SimpleMapProps {
+interface SimpleMapProps extends Readonly<{}> {
   selectedColor: string;
   currentLevel: AdminLevel;
   areaColors: Map<string, string>;
   onAreaColorsChange: (colors: Map<string, string>) => void;
   onMapReady?: () => void;
+  selectedProvinces?: string[]; // Array of province codes to filter districts
 }
 
-export default function SimpleMap({ 
-  selectedColor, 
-  currentLevel, 
-  areaColors, 
-  onAreaColorsChange, 
-  onMapReady 
+export default function SimpleMap({
+  selectedColor,
+  currentLevel,
+  areaColors,
+  onAreaColorsChange,
+  onMapReady,
+  selectedProvinces = []
 }: SimpleMapProps) {
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const currentLayerRef = useRef<L.GeoJSON | null>(null);
   const labelsLayerRef = useRef<L.LayerGroup | null>(null);
+  const provinceBordersRef = useRef<L.GeoJSON | null>(null);
   const selectedColorRef = useRef<string>(selectedColor);
   const areaColorsRef = useRef<Map<string, string>>(areaColors);
-  
+
   // Update refs when props change
   useEffect(() => {
     selectedColorRef.current = selectedColor;
@@ -37,7 +40,7 @@ export default function SimpleMap({
   useEffect(() => {
     areaColorsRef.current = areaColors;
   }, [areaColors]);
-  
+
   // Initialize map
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
@@ -73,17 +76,18 @@ export default function SimpleMap({
 
     return () => {
       if (mapRef.current) {
+        removeProvinceBorders();
         mapRef.current.remove();
         mapRef.current = null;
       }
     };
   }, []);
 
-  // Load data when level changes
+  // Load data when level changes or selected provinces change
   useEffect(() => {
     if (!mapRef.current) return;
     loadLevelData();
-  }, [currentLevel]);
+  }, [currentLevel, selectedProvinces]);
 
   // Update colors when areaColors changes
   useEffect(() => {
@@ -94,9 +98,15 @@ export default function SimpleMap({
     try {
       const response = await fetch(`/data/${currentLevel}.geojson`);
       const data = await response.json();
-      
+
       if (mapRef.current) {
         displayAreas(data);
+        // Load province borders overlay for district level
+        if (currentLevel === 'districts') {
+          await loadProvinceBorders();
+        } else {
+          removeProvinceBorders();
+        }
         onMapReady?.();
       }
     } catch (error) {
@@ -104,8 +114,66 @@ export default function SimpleMap({
     }
   };
 
+  const loadProvinceBorders = async () => {
+    try {
+      const response = await fetch('/data/provinces.geojson');
+      const provincesData = await response.json();
+      
+      if (mapRef.current) {
+        // Remove existing province borders
+        removeProvinceBorders();
+        
+        // Filter provinces based on selection
+        let filteredProvincesData = provincesData;
+        if (selectedProvinces.length > 0) {
+          filteredProvincesData = {
+            ...provincesData,
+            features: provincesData.features.filter((feature: any) => 
+              selectedProvinces.includes(feature.properties.pro_code)
+            )
+          };
+        }
+        
+        // Add province borders with thick dark black lines
+        const provinceBordersLayer = L.geoJSON(filteredProvincesData, {
+          style: () => ({
+            fillColor: 'transparent',
+            fillOpacity: 0,
+            color: '#000000', // Dark black color
+            weight: 3,
+            opacity: 1,
+          }),
+          interactive: false // Make it non-interactive so clicks go through to districts
+        });
+        
+        provinceBordersLayer.addTo(mapRef.current);
+        provinceBordersRef.current = provinceBordersLayer;
+      }
+    } catch (error) {
+      console.error('Error loading province borders:', error);
+    }
+  };
+
+  const removeProvinceBorders = () => {
+    if (provinceBordersRef.current && mapRef.current) {
+      mapRef.current.removeLayer(provinceBordersRef.current);
+      provinceBordersRef.current = null;
+    }
+  };
+
   const displayAreas = (geojsonData: any) => {
     if (!mapRef.current || !labelsLayerRef.current) return;
+
+    // Filter data based on selected provinces for district level
+    let filteredData = geojsonData;
+    if (currentLevel === 'districts' && selectedProvinces.length > 0) {
+      filteredData = {
+        ...geojsonData,
+        features: geojsonData.features.filter((feature: any) => 
+          selectedProvinces.includes(feature.properties.pro_code)
+        )
+      };
+    }
 
     // Remove existing layers
     if (currentLayerRef.current) {
@@ -113,26 +181,26 @@ export default function SimpleMap({
     }
     labelsLayerRef.current.clearLayers();
 
-    const layer = L.geoJSON(geojsonData, {
+    const layer = L.geoJSON(filteredData, {
       style: (feature) => {
         if (!feature) return getDefaultStyle();
-        
+
         const areaCode = getAreaCode(feature, currentLevel);
         const fillColor = areaColorsRef.current.get(areaCode) || '#ffffff';
-        
+
         return {
           fillColor: fillColor,
           fillOpacity: fillColor === '#ffffff' ? 0 : 0.7,
-          color: '#000000',
+          color: getStrokeColor(currentLevel),
           weight: getStrokeWeight(currentLevel),
-          opacity: 1,
+          opacity: getStrokeOpacity(currentLevel),
         };
       },
       onEachFeature: (feature, layer) => {
         if (feature.properties) {
           const areaName = getAreaName(feature, currentLevel);
           const areaCode = getAreaCode(feature, currentLevel);
-          
+
           // Add tooltip
           layer.bindTooltip(areaName, {
             permanent: false,
@@ -142,15 +210,39 @@ export default function SimpleMap({
 
           // Add permanent label for larger areas or when zoomed in
           if (shouldShowLabel(currentLevel)) {
-            const bounds = layer.getBounds();
-            const center = bounds.getCenter();
+            // Use polygon centroid for better positioning instead of bounds center
+            let labelPosition;
+            try {
+              // Try to calculate centroid from the polygon
+              if ((layer as any).getLatLngs && (layer as any).getLatLngs().length > 0) {
+                // For polygon, calculate centroid
+                const latLngs = (layer as any).getLatLngs()[0]; // Get outer ring
+                if (Array.isArray(latLngs) && latLngs.length > 0) {
+                  let lat = 0, lng = 0;
+                  for (const point of latLngs) {
+                    lat += point.lat;
+                    lng += point.lng;
+                  }
+                  lat /= latLngs.length;
+                  lng /= latLngs.length;
+                  labelPosition = L.latLng(lat, lng);
+                } else {
+                  labelPosition = (layer as any).getBounds().getCenter();
+                }
+              } else {
+                labelPosition = (layer as any).getBounds().getCenter();
+              }
+            } catch (error) {
+              // Fallback to bounds center if centroid calculation fails
+              labelPosition = (layer as any).getBounds().getCenter();
+            }
             
-            const marker = L.marker(center, {
+            const marker = L.marker(labelPosition, {
               icon: L.divIcon({
                 className: 'area-label',
                 html: `<div style="color: #000; font-size: ${getLabelSize(currentLevel)}px; font-weight: bold; text-align: center; pointer-events: none; text-shadow: 1px 1px 2px rgba(255,255,255,0.8);">${areaName}</div>`,
-                iconSize: [100, 20],
-                iconAnchor: [50, 10]
+                iconSize: [120, 24],
+                iconAnchor: [60, 12]
               })
             });
             labelsLayerRef.current!.addLayer(marker);
@@ -173,15 +265,15 @@ export default function SimpleMap({
           // Hover effects
           layer.on({
             mouseover: () => {
-              layer.setStyle({
+              (layer as any).setStyle({
                 weight: getStrokeWeight(currentLevel) + 1,
                 opacity: 1,
               });
             },
             mouseout: () => {
-              layer.setStyle({
+              (layer as any).setStyle({
                 weight: getStrokeWeight(currentLevel),
-                opacity: 1,
+                opacity: getStrokeOpacity(currentLevel),
               });
             }
           });
@@ -206,13 +298,13 @@ export default function SimpleMap({
       if (layer.feature) {
         const areaCode = getAreaCode(layer.feature, currentLevel);
         const fillColor = areaColorsRef.current.get(areaCode) || '#ffffff';
-        
-        layer.setStyle({
+
+        (layer as any).setStyle({
           fillColor: fillColor,
           fillOpacity: fillColor === '#ffffff' ? 0 : 0.7,
-          color: '#000000',
+          color: getStrokeColor(currentLevel),
           weight: getStrokeWeight(currentLevel),
-          opacity: 1,
+          opacity: getStrokeOpacity(currentLevel),
         });
       }
     });
@@ -257,6 +349,32 @@ export default function SimpleMap({
     }
   };
 
+  const getStrokeColor = (level: AdminLevel): string => {
+    switch (level) {
+      case 'provinces':
+        return '#000000'; // Dark black
+      case 'districts':
+        return '#666666'; // Light black (gray)
+      case 'subdistricts':
+        return '#888888'; // Lighter gray
+      default:
+        return '#000000';
+    }
+  };
+
+  const getStrokeOpacity = (level: AdminLevel): number => {
+    switch (level) {
+      case 'provinces':
+        return 1;
+      case 'districts':
+        return 0.8;
+      case 'subdistricts':
+        return 0.6;
+      default:
+        return 1;
+    }
+  };
+
   const shouldShowLabel = (level: AdminLevel): boolean => {
     switch (level) {
       case 'provinces':
@@ -286,9 +404,9 @@ export default function SimpleMap({
   const getDefaultStyle = () => ({
     fillColor: '#ffffff',
     fillOpacity: 0,
-    color: '#000000',
-    weight: 2,
-    opacity: 1,
+    color: getStrokeColor(currentLevel),
+    weight: getStrokeWeight(currentLevel),
+    opacity: getStrokeOpacity(currentLevel),
   });
 
   return (

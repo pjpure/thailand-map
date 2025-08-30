@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import dynamic from 'next/dynamic';
-import { Palette, Layers, RotateCcw } from 'lucide-react';
+import { Palette, Layers, RotateCcw, Search, X, ChevronDown } from 'lucide-react';
 
 // Dynamically import Map component to avoid SSR issues with Leaflet
 const SimpleMap = dynamic(() => import('@/components/SimpleMap'), {
@@ -36,9 +36,65 @@ export default function Home() {
   const [currentLevel, setCurrentLevel] = useState<AdminLevel>('provinces');
   const [isLoading, setIsLoading] = useState(true);
   const [areaColors, setAreaColors] = useState<Map<string, string>>(new Map());
+  const [selectedProvinces, setSelectedProvinces] = useState<string[]>([]);
+  const [availableProvinces, setAvailableProvinces] = useState<{code: string, name: string}[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
   const handleClearColors = () => {
     setAreaColors(new Map());
+  };
+
+  // Load provinces list when component mounts
+  React.useEffect(() => {
+    const loadProvinces = async () => {
+      try {
+        const response = await fetch('/data/provinces.geojson');
+        const data = await response.json();
+        const provinces = data.features.map((feature: any) => ({
+          code: feature.properties.pro_code,
+          name: feature.properties.pro_th
+        })).sort((a: any, b: any) => a.name.localeCompare(b.name));
+        setAvailableProvinces(provinces);
+      } catch (error) {
+        console.error('Error loading provinces:', error);
+      }
+    };
+    loadProvinces();
+  }, []);
+
+  // Close dropdown when clicking outside
+  React.useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Element;
+      if (!target.closest('.province-dropdown')) {
+        setIsDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Filter provinces based on search term
+  const filteredProvinces = availableProvinces.filter(province =>
+    province.name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const handleProvinceToggle = (provinceCode: string) => {
+    setSelectedProvinces(prev =>
+      prev.includes(provinceCode)
+        ? prev.filter(code => code !== provinceCode)
+        : [...prev, provinceCode]
+    );
+  };
+
+  const handleSelectAll = () => {
+    setSelectedProvinces(filteredProvinces.map(p => p.code));
+  };
+
+  const handleClearSelection = () => {
+    setSelectedProvinces([]);
   };
 
   return (
@@ -65,7 +121,7 @@ export default function Home() {
         </div>
 
         <div className="flex items-center justify-between">
-          {/* Level Selector */}
+          {/* Level Selector and Province Filter */}
           <div className="flex items-center space-x-4">
             <div className="flex items-center space-x-2">
               <Layers className="h-5 w-5 text-gray-600" />
@@ -82,6 +138,96 @@ export default function Home() {
                 </option>
               ))}
             </select>
+
+            {/* Province Filter - only show for districts level */}
+            {currentLevel === 'districts' && (
+              <>
+                <div className="flex items-center space-x-2">
+                  <span className="text-sm font-medium text-gray-700">จังหวัด:</span>
+                </div>
+                <div className="relative province-dropdown">
+                  {/* Selected provinces display and toggle button */}
+                  <button
+                    onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                    className="px-3 py-2 border-2 border-gray-800 bg-white text-sm font-medium focus:outline-none min-w-[200px] flex items-center justify-between"
+                  >
+                    <span className="truncate">
+                      {selectedProvinces.length === 0 
+                        ? 'เลือกจังหวัด' 
+                        : selectedProvinces.length === 1 
+                        ? availableProvinces.find(p => p.code === selectedProvinces[0])?.name
+                        : `${selectedProvinces.length} จังหวัด`
+                      }
+                    </span>
+                    <ChevronDown className={`h-4 w-4 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {/* Dropdown */}
+                  {isDropdownOpen && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-white border-2 border-gray-800 max-h-64 overflow-hidden z-50">
+                      {/* Search input */}
+                      <div className="p-2 border-b border-gray-200">
+                        <div className="relative">
+                          <Search className="absolute left-2 top-2 h-4 w-4 text-gray-400" />
+                          <input
+                            type="text"
+                            placeholder="ค้นหาจังหวัด..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="w-full pl-8 pr-2 py-1 border border-gray-300 text-sm focus:outline-none focus:border-gray-500"
+                          />
+                          {searchTerm && (
+                            <X 
+                              className="absolute right-2 top-2 h-4 w-4 text-gray-400 cursor-pointer hover:text-gray-600"
+                              onClick={() => setSearchTerm('')}
+                            />
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Action buttons */}
+                      <div className="p-2 border-b border-gray-200 flex space-x-2">
+                        <button
+                          onClick={handleSelectAll}
+                          className="px-2 py-1 text-xs border border-gray-300 bg-white hover:bg-gray-100"
+                          disabled={filteredProvinces.length === 0}
+                        >
+                          เลือกทั้งหมด
+                        </button>
+                        <button
+                          onClick={handleClearSelection}
+                          className="px-2 py-1 text-xs border border-gray-300 bg-white hover:bg-gray-100"
+                        >
+                          ล้าง
+                        </button>
+                      </div>
+
+                      {/* Province list */}
+                      <div className="max-h-40 overflow-y-auto">
+                        {filteredProvinces.length > 0 ? (
+                          filteredProvinces.map((province) => (
+                            <label
+                              key={province.code}
+                              className="flex items-center px-3 py-2 hover:bg-gray-100 cursor-pointer"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedProvinces.includes(province.code)}
+                                onChange={() => handleProvinceToggle(province.code)}
+                                className="mr-2"
+                              />
+                              <span className="text-sm">{province.name}</span>
+                            </label>
+                          ))
+                        ) : (
+                          <div className="px-3 py-2 text-sm text-gray-500">ไม่พบจังหวัดที่ค้นหา</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
 
           {/* Color Picker */}
@@ -116,6 +262,7 @@ export default function Home() {
           areaColors={areaColors}
           onAreaColorsChange={setAreaColors}
           onMapReady={() => setIsLoading(false)}
+          selectedProvinces={selectedProvinces}
         />
 
         {/* Loading Indicator */}
