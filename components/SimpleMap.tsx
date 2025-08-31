@@ -68,6 +68,9 @@ export default function SimpleMap({
       doubleClickZoom: false,
       dragging: true,
       attributionControl: false,
+      zoomDelta: 0.25,
+      zoomSnap: 0.25,
+      wheelPxPerZoomLevel: 120,
     });
 
     // Add simple white tile layer (no external tiles needed)

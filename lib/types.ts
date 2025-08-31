@@ -150,8 +150,8 @@ export interface MapConfig {
 export const THAILAND_CONFIG: MapConfig = {
   center: [13.7563, 100.5018] as [number, number],
   zoom: 6,
-  minZoom: 5,
-  maxZoom: 15,
+  minZoom: 4,
+  maxZoom: 18,
   bounds: {
     north: 20.4634,
     south: 5.6126,
